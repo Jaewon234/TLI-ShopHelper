@@ -64,8 +64,8 @@ public sealed class Config
 {
     [JsonPropertyName("_log_설명")] public string LogNote { get; set; } = "auto = 스팀/실행 중인 게임에서 자동으로 찾기. 직접 지정하려면 경로를 넣으세요";
     [JsonPropertyName("log_path")] public string LogPath { get; set; } = "auto";
-    [JsonPropertyName("_mode_설명")] public string ModeNote { get; set; } = "use = 직접 쓸 때(시세보다 싸면 이득), resell = 되팔 때(세금 떼고 올림한 실수령보다 싸야 이득)";
-    [JsonPropertyName("mode")] public string Mode { get; set; } = "use";
+    [JsonPropertyName("_mode_설명")] public string ModeNote { get; set; } = "resell = 결정화 기준(팔아서 결정으로 받을 때: 수수료 떼고 올림한 실수령보다 싸야 이득, 기본), use = 직접 쓸 때(시세보다 싸면 이득)";
+    [JsonPropertyName("mode")] public string Mode { get; set; } = "resell";
     [JsonPropertyName("tax_rate")] public double TaxRate { get; set; } = 0.125;
     [JsonPropertyName("refresh_cost")] public double RefreshCost { get; set; } = 50;
     [JsonPropertyName("_scan_설명")] public string ScanNote { get; set; } = "처음 칸 위치를 찾을 때 읽는 세로 범위(0~1)와 확대 배율";
@@ -82,14 +82,13 @@ public sealed class Config
     public static List<ItemDef> DefaultItems() => new()
     {
         new() { Name = "최초의 불꽃 결정", Price = 50, Taxed = false },
-        new() { Name = "에너지 코어", Price = 2 },
+        new() { Name = "최초의 불꽃 가루", Price = null, Aliases = new() { "결정가루" } },
         new() { Name = "이계의 메아리", Price = 5.5 },
         new() { Name = "승화의 쐐기(매직)", Price = 0.3 },
         new() { Name = "승화의 쐐기(레어)", Price = 3.5 },
         new() { Name = "승화의 쐐기(레전드)", Price = 275 },
+        new() { Name = "에너지 코어", Price = 2 },
         new() { Name = "절대자 엠버", Price = 1025 },
-        new() { Name = "최초의 불꽃 가루", Price = null },
-        new() { Name = "신비의 휘석(소)", Price = null },
     };
 
     static readonly JsonSerializerOptions Opts = new()

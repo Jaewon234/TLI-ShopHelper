@@ -19,6 +19,20 @@ static class App
         }
     }
 
+    static DateTime savedAt;
+    public static void ConfigSaved() { try { savedAt = File.GetLastWriteTimeUtc(ConfigPath); } catch { } }
+    /// <summary>메모장 등으로 config.json 을 바꿨는지 (우리가 저장한 건 제외).</summary>
+    public static bool ConfigChangedOutside()
+    {
+        try
+        {
+            var t = File.GetLastWriteTimeUtc(ConfigPath);
+            if (t == savedAt) return false;
+            savedAt = t; return true;
+        }
+        catch { return false; }
+    }
+
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
     [STAThread]
@@ -52,6 +66,7 @@ static class App
         using var single = new Mutex(true, "ShopHelper_TLI_GodsBlessing", out bool first);
         if (!first) { Error("이미 실행 중입니다. (작업 표시줄 오른쪽 트레이 아이콘 확인)"); return 0; }
 
+        ConfigSaved();
         var overlay = new Overlay(cfg);
         var engine = new Engine(cfg, ocr, overlay);
         overlay.Engine = engine;
@@ -80,6 +95,8 @@ sealed class Engine
 
     public void Start() => new Thread(Run) { IsBackground = true, Name = "engine" }.Start();
     public void Reevaluate() { reevaluate = true; wake.Set(); }
+    volatile List<string> unknown = new();
+    public List<string> UnknownNames() => unknown;
     public void RequestSave() { saveRequested = true; wake.Set(); }
 
     void OnShop(bool open)
@@ -115,9 +132,15 @@ sealed class Engine
         IntPtr hwnd = IntPtr.Zero;
         double lastFind = -1e9;
         bool shown = false;
+        double lastCfgCheck = 0;
         while (true)
         {
             double now = sw.Elapsed.TotalMilliseconds;
+            if (now - lastCfgCheck > 1000)
+            {
+                lastCfgCheck = now;
+                if (App.ConfigChangedOutside() && overlay.ReloadFromDisk()) App.Log("config.json 변경 감지 → 다시 읽음");
+            }
             if (reevaluate) { reevaluate = false; tracker.Reevaluate(); if (shown) overlay.Show(null, tracker.Snap()); }
             if (saveRequested)
             {
@@ -136,7 +159,15 @@ sealed class Engine
                 hwnd = GameWindow.Find(cfg); lastFind = now;
             }
             var rect = GameWindow.ClientRect(hwnd);
-            if (rect == null || GetForegroundWindow() != hwnd)
+            var fg = GetForegroundWindow();
+            if (rect != null && fg != hwnd && fg != IntPtr.Zero && fg == overlay.EditorHwnd)
+            {
+                // 시세 입력 창을 쓰는 동안: 화면 추적은 멈추고 결과만 계속 보여줌
+                if (!shown) { overlay.Show(rect.Value, tracker.Snap()); shown = true; }
+                wake.WaitOne(60);
+                continue;
+            }
+            if (rect == null || fg != hwnd)
             {
                 if (shown) { overlay.Hide(); shown = false; }
                 Thread.Sleep(60);
@@ -146,6 +177,7 @@ sealed class Engine
             var rows = tracker.Rows;
             var frame = rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
             bool dirty = tracker.Update(frame, now);
+            if (dirty) unknown = tracker.UnknownNames();
             if (dirty || !shown || overlay.RectChanged(rect.Value))
             {
                 overlay.Show(rect.Value, tracker.Snap());

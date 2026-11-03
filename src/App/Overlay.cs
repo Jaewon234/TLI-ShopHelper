@@ -16,6 +16,9 @@ sealed class Overlay
 
     readonly Config cfg;
     public Engine? Engine;
+    Editor? editor;
+    IntPtr inst;
+    public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     readonly WndProc proc;   // GC 방지
     IntPtr hwnd, msgWnd, keyBrush, panelBrush, icon;
     readonly object gate = new();
@@ -55,7 +58,7 @@ sealed class Overlay
     // ---------------- UI 스레드 ----------------
     public void Run(Action onReady)
     {
-        var inst = GetModuleHandleW(null);
+        inst = GetModuleHandleW(null);
         icon = LoadIconW(IntPtr.Zero, new IntPtr(32516)); // IDI_INFORMATION
         var wc = new WNDCLASSEX
         {
@@ -63,6 +66,9 @@ sealed class Overlay
             lpszClassName = "ShopHelperOverlay", hIcon = icon, hIconSm = icon,
         };
         RegisterClassExW(ref wc);
+        var ec = wc; ec.lpszClassName = "ShopHelperEditor"; ec.hbrBackground = new IntPtr(16); // COLOR_BTNFACE+1
+        ec.hCursor = LoadCursorW(IntPtr.Zero, new IntPtr(32512));
+        RegisterClassExW(ref ec);
         keyBrush = CreateSolidBrush(KEY);
         panelBrush = CreateSolidBrush(Panel);
 
@@ -75,10 +81,14 @@ sealed class Overlay
         msgWnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, "ShopHelperTray", WS_POPUP, 0, 0, 0, 0,
             IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
         AddTray();
+        if (!RegisterHotKey(msgWnd, 1, 0x2 | 0x4 | 0x4000, 0x50)) App.Log("단축키 Ctrl+Shift+P 등록 실패 (다른 프로그램이 사용 중)");
+        editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
         onReady();
 
         while (GetMessageW(out var m, IntPtr.Zero, 0, 0) > 0)
         {
+            var eh = EditorHwnd;
+            if (eh != IntPtr.Zero && IsDialogMessageW(eh, ref m)) continue; // Tab 키 이동
             TranslateMessage(ref m);
             DispatchMessageW(ref m);
         }
@@ -110,11 +120,12 @@ sealed class Overlay
         const uint CHECKED = 0x8, GRAYED = 0x1, SEP = 0x800;
         AppendMenuW(menu, GRAYED, UIntPtr.Zero, Engine?.LogInfo ?? "");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, cfg.Resell ? 0 : CHECKED, (UIntPtr)1, "직접 사용 기준 (시세)");
-        AppendMenuW(menu, cfg.Resell ? CHECKED : 0, (UIntPtr)2, "되팔기 기준 (세금 반영)");
+        AppendMenuW(menu, 0, (UIntPtr)7, "시세 바로 바꾸기...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, 0, (UIntPtr)3, "시세 설정 열기 (config.json)");
-        AppendMenuW(menu, 0, (UIntPtr)4, "시세 설정 다시 읽기");
+        AppendMenuW(menu, cfg.Resell ? CHECKED : 0, (UIntPtr)2, "결정화 기준 (팔아서 결정, 수수료 반영)");
+        AppendMenuW(menu, cfg.Resell ? 0 : CHECKED, (UIntPtr)1, "직접 사용 기준 (시세)");
+        AppendMenuW(menu, SEP, UIntPtr.Zero, null);
+        AppendMenuW(menu, 0, (UIntPtr)3, "config.json 열기 (메모장, 저장하면 자동 반영)");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
         AppendMenuW(menu, 0, (UIntPtr)6, "프로그램 로그 열기");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
@@ -128,7 +139,7 @@ sealed class Overlay
             case 1: SetMode("use"); break;
             case 2: SetMode("resell"); break;
             case 3: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.ConfigPath}\"", null, 1); break;
-            case 4: ReloadConfig(); break;
+            case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
             case 6: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.LogPath}\"", null, 1); break;
             case 9: PostQuitMessage(0); break;
@@ -142,25 +153,36 @@ sealed class Overlay
         Engine?.Reevaluate();
     }
 
-    void ReloadConfig()
+    void OpenEditor()
+    {
+        try { editor?.Open("ShopHelperEditor", inst); }
+        catch (Exception e) { App.Log("시세 창 오류: " + e); }
+    }
+
+    /// <summary>엔진 스레드에서 호출: 바깥에서 고친 config.json 을 다시 읽음.</summary>
+    public bool ReloadFromDisk()
     {
         try
         {
             var n = Config.Load(App.ConfigPath);
             cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost;
             Engine?.Reevaluate();
-            lock (gate) { notifyTitle = "시세 설정을 다시 읽었습니다"; notifyText = $"항목 {n.Items.Count}개"; }
-            ShowBalloon();
+            Notify("시세 설정 반영됨", $"config.json 변경 감지 (항목 {n.Items.Count}개)");
+            return true;
         }
-        catch (Exception e) { App.Error("config.json 오류:\n" + e.Message); }
+        catch (Exception e) { App.Log("config.json 오류: " + e.Message); return false; }
     }
 
     IntPtr WndProcImpl(IntPtr h, uint msg, IntPtr w, IntPtr l)
     {
         try
         {
+            if (editor != null && editor.Handle(h, msg, w, l)) return IntPtr.Zero;
             switch (msg)
             {
+                case 0x312: // WM_HOTKEY
+                    OpenEditor();
+                    return IntPtr.Zero;
                 case MSG_UPDATE:
                     (int X, int Y, int W, int H) r;
                     lock (gate) r = rect;
@@ -174,7 +196,8 @@ sealed class Overlay
                     return IntPtr.Zero;
                 case MSG_TRAY:
                     int ev = (int)(l.ToInt64() & 0xFFFF);
-                    if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU || ev == WM_LBUTTONDBLCLK) TrayMenu();
+                    if (ev == WM_LBUTTONDBLCLK) OpenEditor();
+                    else if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU) TrayMenu();
                     return IntPtr.Zero;
                 case MSG_NOTIFY:
                     ShowBalloon();
@@ -248,38 +271,47 @@ sealed class Overlay
     {
         int basePx = s.Slots.Count > 0 ? (int)(s.Slots[0].R.H / 5.4) : Math.Max(12, h / 70);
         basePx = Math.Max(11, basePx);
+        double crystal = PriceInput.CrystalPrice(cfg);
+        string Gain(double huiseok) => (huiseok > 0 ? "+" : "") + (huiseok / crystal).ToString("0.##") + "결";
+
         foreach (var sl in s.Slots)
         {
             var c = sl.Card;
-            if (sl.Pending)
-            {
-                Frame(dc, sl.R, Yellow, 1);
-                continue;
-            }
+            var d = sl.D;
+            if (sl.Pending) { Frame(dc, d, Yellow, 1); continue; }
             if (c == null)
             {
-                Frame(dc, sl.R, Gray, 2);
-                Label(dc, sl.R.Cx, sl.R.Y2 + 4, "읽기 실패", Gray, basePx);
+                Frame(dc, d, Gray, 1);
+                Label(dc, d.Cx, d.Y1 - 4, "읽기 실패", Gray, basePx, 1);
                 continue;
             }
-            uint col = c.Status switch { Verdict.Good => Green, Verdict.Bad => Red, _ => Gray };
-            Frame(dc, sl.R, col, c.Status == Verdict.Good ? 4 : 2);
-            string main = c.Status == Verdict.Unknown
-                ? (c.Item == null ? "모르는 항목" : "시세 없음")
-                : (c.Diff > 0 ? "+" : "") + Parser.Fmt(c.Diff);
-            Label(dc, sl.R.Cx, sl.R.Y2 + 4, main, col, basePx + 3);
-            if (c.Status != Verdict.Unknown)
-                Label(dc, sl.R.Cx, sl.R.Y2 + 4 + (basePx + 3) * 1.9, "가치 " + Parser.Fmt(c.Value), White, basePx);
+            switch (c.Status)
+            {
+                case Verdict.Good:
+                    // 사야 할 칸: 굵은 초록 테두리 + 위쪽에 "구매 +N결"
+                    Frame(dc, d, Green, Math.Max(4, basePx / 3));
+                    Frame(dc, new Box(d.X1 + 5, d.Y1 + 5, d.X2 - 5, d.Y2 - 5), Green, 1);
+                    Label(dc, d.Cx, d.Y1 - 4, "구매 " + Gain(c.Diff!.Value), Green, basePx + 4, 1);
+                    break;
+                case Verdict.Bad:
+                    Frame(dc, d, Red, 1);
+                    Label(dc, d.Cx, d.Y1 - 4, Gain(c.Diff!.Value), Red, basePx - 1, 1);
+                    break;
+                default:
+                    Frame(dc, d, Gray, 1);
+                    Label(dc, d.Cx, d.Y1 - 4, c.Item == null ? "모르는 항목" : "시세 없음", Gray, basePx - 1, 1);
+                    break;
+            }
         }
 
         var good = s.Slots.Where(x => x.Card?.Status == Verdict.Good).ToList();
         var lines = new List<string>
         {
-            $"이 화면 이득 +{Parser.Fmt(s.PageGain)}  ({good.Count}칸)  [{(cfg.Resell ? "되팔기" : "직접사용")}]",
+            $"이 화면 이득 {Gain(s.PageGain)}  (구매 {good.Count}칸)  [{(cfg.Resell ? "결정화 기준" : "직접 사용 기준")}]",
         };
         if (s.Pages > 0)
-            lines.Add($"본 화면 {s.Pages}개 · 평균 이득 {Parser.Fmt(Math.Round(s.SumGain / s.Pages, 1))} / 새로고침 {Parser.Fmt(cfg.RefreshCost)}");
-        if (s.LatencyMs is double ms) lines.Add($"반영 {ms:0}ms");
+            lines.Add($"본 화면 {s.Pages}개 · 평균 이득 {Gain(s.SumGain / s.Pages)} / 새로고침 {(cfg.RefreshCost / crystal):0.##}결");
+        if (s.LatencyMs is double ms) lines.Add($"반영 {ms:0}ms   ·   시세 바꾸기 Ctrl+Shift+P");
         if (s.Status.Length > 0) lines.Add(s.Status);
         string text = string.Join("\n", lines);
         if (s.Refresh is Box rb)

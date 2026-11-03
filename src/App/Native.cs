@@ -78,6 +78,7 @@ static class Native
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] public static extern IntPtr LoadCursorW(IntPtr inst, IntPtr name);
     [DllImport("user32.dll")] public static extern IntPtr LoadIconW(IntPtr inst, IntPtr name);
     [DllImport("user32.dll")] public static extern IntPtr CreatePopupMenu();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool AppendMenuW(IntPtr menu, uint flags, UIntPtr id, string? text);
@@ -112,6 +113,16 @@ static class Native
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern bool QueryFullProcessImageNameW(IntPtr h, uint flags, StringBuilder sb, ref int size);
     [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr GetModuleHandleW(string? name);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessageW(IntPtr h, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SetWindowTextW(IntPtr h, string text);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLengthW(IntPtr h);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
+    [DllImport("user32.dll")] public static extern bool DestroyWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
+    [DllImport("user32.dll")] public static extern uint GetDpiForSystem();
+    [DllImport("user32.dll")] public static extern bool IsDialogMessageW(IntPtr h, ref MSG m);
+    [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint vk);
 
     public static uint Rgb(int r, int g, int b) => (uint)(r | (g << 8) | (b << 16));
 }

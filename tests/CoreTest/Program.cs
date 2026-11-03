@@ -138,6 +138,16 @@ static class T
         cfg.Mode = "resell"; tr.Reevaluate();
         Check(tr.Snap().Slots[3].Card?.Status == Verdict.Unknown, "불꽃 가루는 시세 없음");
 
+        Console.WriteLine("[7] 시세 입력 해석");
+        double? v;
+        Check(PriceInput.TryParse("5.5", 50, out v) && v == 5.5, "5.5");
+        Check(PriceInput.TryParse("40/20", 50, out v) && v == 2, "40/20 = 2");
+        Check(PriceInput.TryParse("20.5결", 50, out v) && v == 1025, "20.5결 = 1025");
+        Check(PriceInput.TryParse("0.8결/20", 50, out v) && v == 2, "0.8결/20 = 2");
+        Check(PriceInput.TryParse(" 3 / 10개 ", 50, out v) && v == 0.3, "3 / 10개 = 0.3");
+        Check(PriceInput.TryParse("", 50, out v) && v == null, "빈칸 = 시세 없음");
+        Check(!PriceInput.TryParse("abc", 50, out _) && !PriceInput.TryParse("5/0", 50, out _), "잘못된 입력 거부");
+
         Console.WriteLine(fails == 0 ? "\n모든 테스트 통과" : $"\n실패 {fails}개");
         return fails;
     }

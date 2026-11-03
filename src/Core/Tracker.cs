@@ -10,6 +10,7 @@ public interface IOcr
 public sealed class SlotView
 {
     public Box R;
+    public Box D;   // 카드 전체(그림 포함) - 표시용
     public Card? Card;
     public bool Pending;
 }
@@ -35,7 +36,7 @@ public sealed class Tracker
 {
     sealed class Slot
     {
-        public Box R, PriceR;
+        public Box R, PriceR, D;
         public byte[]? SettledFp, SettledPfp, PrevFp, PrevPfp;
         public Card? Card;
         public bool Pending;
@@ -252,6 +253,7 @@ public sealed class Tracker
         {
             R = new Box(c - half, py1 - 4.6 * h, c + half, py2 + 0.4 * h),
             PriceR = new Box(c - half, py1 - 0.3 * h, c + half, py2 + 0.3 * h),
+            D = new Box(c - half * 1.02, py1 - 12.3 * h, c + half * 1.02, py2 + 0.6 * h),
         }).ToList();
     }
 
@@ -273,9 +275,13 @@ public sealed class Tracker
 
     double CurrentGain() => slots?.Where(s => s.Card?.Status == Verdict.Good).Sum(s => s.Card!.Diff!.Value) ?? 0;
 
+    /// <summary>지금 화면에서 시세표에 없는 항목 이름 (시세 입력 창에 자동으로 추가).</summary>
+    public List<string> UnknownNames() =>
+        slots?.Where(s => s.Card != null && s.Card.Item == null).Select(s => s.Card!.Name).ToList() ?? new();
+
     public Snapshot Snap() => new()
     {
-        Slots = slots?.Select(s => new SlotView { R = s.R, Card = s.Card, Pending = s.Pending }).ToList() ?? new(),
+        Slots = slots?.Select(s => new SlotView { R = s.R, D = s.D, Card = s.Card, Pending = s.Pending }).ToList() ?? new(),
         Refresh = refresh,
         Pages = pages,
         SumGain = sumGain,
