@@ -247,6 +247,11 @@ static class T
         Check(PriceInput.TryParse("", 50, out v) && v == null, "빈칸 = 시세 없음");
         Check(!PriceInput.TryParse("abc", 50, out _) && !PriceInput.TryParse("5/0", 50, out _), "잘못된 입력 거부");
 
+        Check(Parser.FmtPrice(0.006) == "0.006" && Parser.FmtPrice(0.11) == "0.11" && Parser.FmtPrice(0.123456) == "0.12346" && Parser.FmtPrice(20.5) == "20.5" && Parser.FmtPrice(50) == "50",
+              "시세 표시 소수점 5자리 (0.006, 0.11, 0.12346, 20.5, 50)");
+        foreach (var it in new Config().Items.Where(i => i.Price is double))
+            Check(PriceInput.TryParse(Parser.FmtPrice(it.Price!.Value), 50, out var back) && back == it.Price, $"{it.Name}: 표시→다시 읽기 그대로 ({Parser.FmtPrice(it.Price!.Value)})");
+
         Console.WriteLine("[8] 신비의 휘석(소) 도박");
         var gc = new Config();
         Card G(int price) { var c = new Card { Name = "신비의휘석(소)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }

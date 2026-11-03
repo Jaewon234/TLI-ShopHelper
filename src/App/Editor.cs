@@ -146,9 +146,9 @@ sealed class Editor
 
         loading = true;
         rows.Clear();
-        rateEdit = FieldEdit(Parser.Fmt(cfg.CrystalRate), S(FieldX), S(Header + 6), ID_RATE);
+        rateEdit = FieldEdit(Parser.FmtPrice(cfg.CrystalRate), S(FieldX), S(Header + 6), ID_RATE);
         int y = y0, i = 0;
-        foreach (var it in items) AddRow(it.Name, it.Price is double p ? Parser.Fmt(p) : "", it, i++, editableName: false, ref y);
+        foreach (var it in items) AddRow(it.Name, it.Price is double p ? Parser.FmtPrice(p) : "", it, i++, editableName: false, ref y);
         foreach (var name in extra) AddRow(name, "", null, i++, editableName: true, ref y);
         AddRow("", "", null, i++, editableName: true, ref y);
         loading = false;
@@ -233,7 +233,7 @@ sealed class Editor
                 string res = "";
                 uint rc = Dim;
                 if (!PriceInput.TryParse(pt, rate, out var v)) { res = "형식 오류"; rc = Warn; }
-                else if (v is double d) res = "= " + Parser.Fmt(Math.Round(d * rate, 4)) + "휘";
+                else if (v is double d) res = "= " + Parser.FmtPrice(d * rate) + "휘";
                 c.Text(S(FieldX + FieldW + 12), y + S(7), res, S(13), false, rc);
             }
             // 아래

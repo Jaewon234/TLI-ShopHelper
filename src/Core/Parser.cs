@@ -250,6 +250,9 @@ public static class Parser
         return Math.Abs(d - Math.Round(d)) < 1e-9 ? ((long)Math.Round(d)).ToString() : d.ToString("0.#");
     }
 
+    /// <summary>시세 표시용: 소수점 5자리까지 (0.006, 0.11 이 잘리지 않게).</summary>
+    public static string FmtPrice(double v) => Math.Round(v, 5).ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
+
     public static string Describe(IEnumerable<Card?> cards, Config cfg)
     {
         var sb = new System.Text.StringBuilder();
