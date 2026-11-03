@@ -87,6 +87,7 @@ sealed class FakeOcr : IOcr
     public HashSet<string> MissInFullScan = new();   // 전체 화면 OCR 에서만 놓치는 글자 (칸 단위로는 읽힘)
     public HashSet<string> MissUnlessPriceOnly = new(); // 가격 줄만 크게 읽을 때만 읽히는 글자 (작은 숫자)
     public HashSet<string> NeverRead = new();          // 아예 못 읽는 글자 (매진되어 흐린 카드)
+    public Dictionary<string, string> MisreadOnce = new(); // 처음 한 번만 잘못 읽는 글자 (588 → 432)
     public int MaxDim => 10000;
     public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
     {
@@ -94,9 +95,10 @@ sealed class FakeOcr : IOcr
         if (Fail) return new();
         bool full = src.W > 1000;
         bool priceOnly = src.H < 40;
+        string Read(string t) { if (MisreadOnce.TryGetValue(t, out var wrong)) { MisreadOnce.Remove(t); return wrong; } return t; }
         var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text)) && !NeverRead.Contains(t.Text)
                                          && !(!priceOnly && MissUnlessPriceOnly.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
-            .Select(t => new OcrWord(t.Text, (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
+            .Select(t => new OcrWord(Read(t.Text), (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
         // Windows OCR 처럼 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
         return words.GroupBy(w => Math.Round(w.Y)).Select(g => g.OrderBy(w => w.X).ToList()).ToList();
     }
@@ -125,7 +127,7 @@ static class T
     static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--write-config") { new Config().Save(args[1]); return 0; }
-        var cfg = new Config { CrystalRate = 50 };   // 테스트는 결정 1개 = 50휘석 기준
+        var cfg = new Config { CrystalRate = 50, RereadSec = 0 };   // 테스트는 결정 1개 = 50휘석, 자동 읽기 끔 (기억 동작 확인용)
         Console.WriteLine("[1] 파서: 스크린샷 배치");
         var ocr = new FakeOcr { Scene = Scene.Make(NamesA, PricesA) };
         var (cards, refresh) = Parser.Analyze(ocr.Recognize(new Frame(1, 1), new Box(0, 0, 1920, 1080), 1), cfg);
@@ -276,6 +278,20 @@ static class T
         var s7 = tr7.Snap();
         Check(s7.Slots.Count == 8 && Math.Abs(s7.Slots[0].R.Cx - 443) < 6, $"첫 칸도 칸으로 잡음 (8칸) - 실제 {s7.Slots.Count}칸, 첫 칸 {s7.Slots[0].R.Cx:0}");
         Check(s7.Slots[2].Card?.Price == 6 && s7.Slots[7].Card?.Price == 500, $"가격 줄만 크게 다시 읽어 6, 500 - {s7.Slots[2].Card?.Price}, {s7.Slots[7].Card?.Price}");
+
+        Console.WriteLine("[5d4] 처음에 잘못 읽어도 자동 읽기(1초마다)로 바로잡음 (메아리 100개 588 → 432)");
+        var p8 = (string[])p6.Clone(); p8[4] = "588";
+        var ocr8 = new FakeOcr { MisreadOnce = new() { ["588"] = "432" } };
+        var cfg8 = new Config { CrystalRate = 50, RereadSec = 1 };
+        var tr8 = new Tracker(ocr8, cfg8) { Log = m => Console.WriteLine("    log: " + m) };
+        double t8 = 0; tr8.Reset(t8);
+        Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 12);   // 첫 스캔 (0.25초 뒤)
+        Check(tr8.Snap().Slots[4].Card?.Price == 432, "처음엔 432 로 잘못 읽음");
+        Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 40);   // 1.2초
+        Check(tr8.Snap().Slots[4].Card?.Price == 588 && tr8.Snap().Slots[4].Card?.Status == Verdict.Bad, "1초 뒤 588 로 고쳐 손해로 표시");
+        cfg8.RereadSec = 0; ocr8.Calls = 0;
+        Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 80);
+        Check(ocr8.Calls == 0, $"끄기면 다시 읽지 않음 - OCR {ocr8.Calls}번");
 
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);

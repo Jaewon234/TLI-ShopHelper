@@ -41,7 +41,7 @@ sealed class Editor
     bool loading, dirty;
     string status = "";
     double scale = 1;
-    int winW, winH, footerY;
+    int winW, winH, footerY, mainW;
     HashSet<string> builtExtra = new();
     (int X, int Y, int W, int H) placedFor;
 
@@ -60,7 +60,7 @@ sealed class Editor
     {
         if (!Exists || !ShopMode || !IsWindowVisible(Hwnd)) return null;
         GetWindowRect(Hwnd, out var r);
-        return (r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top);
+        return (r.Left, r.Top, mainW, r.Bottom - r.Top);   // 이익 카드는 시세 입력 칸 폭에 맞춤
     }
 
     // ---------------- 열기/닫기 ----------------
@@ -118,9 +118,18 @@ sealed class Editor
 
     // ---------------- 배치 ----------------
     const int W = 400, Header = 58, RowH = 38, FieldX = 196, FieldW = 108, FieldH = 30;
+    // 오른쪽 아래에 붙은 '자동 읽기' 칸
+    const int SideW = 150, SideGap = 10, SideH = 222;
+    static readonly (double sec, string label)[] Speeds = { (0.5, "0.5초마다"), (1, "1초마다"), (2, "2초마다"), (0, "끄기") };
 
-    (int x, int y, int w, int h) ButtonRect => (winW - S(18) - S(104), footerY + S(12), S(104), S(38));
-    (int x, int y, int w, int h) CloseRect => (winW - S(38), S(16), S(22), S(22));
+    (int x, int y, int w, int h) ButtonRect => (mainW - S(18) - S(104), footerY + S(12), S(104), S(38));
+    (int x, int y, int w, int h) CloseRect => (mainW - S(38), S(16), S(22), S(22));
+    (int x, int y, int w, int h) SideRect => (mainW + S(SideGap), winH - S(SideH), S(SideW), S(SideH));
+    (int x, int y, int w, int h) SpeedRect(int i)
+    {
+        var (sx, sy, sw, _) = SideRect;
+        return (sx + S(12), sy + S(46) + i * S(38), sw - S(24), S(32));
+    }
 
     void Create(bool shop)
     {
@@ -134,14 +143,21 @@ sealed class Editor
         var extra = builtExtra.ToList();
         int n = items.Count + extra.Count + 1;
 
-        winW = S(W);
+        mainW = S(W);
+        winW = mainW + S(SideGap + SideW);
         int y0 = Header + 52;                     // 결정 환율 줄 + 구분선 아래
         footerY = S(y0 + RowH * n + 6);
-        winH = footerY + S(62);
+        winH = Math.Max(footerY + S(62), S(SideH));
         Hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_CONTROLPARENT | WS_EX_TOOLWINDOW_ | WS_EX_LAYERED, cls, "시세 입력",
             WS_POPUP | WS_CLIPCHILDREN, 0, 0, winW, winH, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
         SetLayeredWindowAttributes(Hwnd, 0, 246, 2);                         // 살짝 투명
-        SetWindowRgn(Hwnd, CreateRoundRectRgn(0, 0, winW + 1, winH + 1, S(28), S(28)), true); // 둥근 모서리
+        // 둥근 모서리 두 칸(시세 입력 + 오른쪽 아래 자동 읽기)을 합친 모양
+        var rgn = CreateRoundRectRgn(0, 0, mainW + 1, winH + 1, S(28), S(28));
+        var (sx0, sy0, sw0, sh0) = SideRect;
+        var side = CreateRoundRectRgn(sx0, sy0, sx0 + sw0 + 1, sy0 + sh0 + 1, S(28), S(28));
+        CombineRgn(rgn, rgn, side, 2 /*RGN_OR*/);
+        DeleteObject(side);
+        SetWindowRgn(Hwnd, rgn, true);
         SetWindowDisplayAffinity(Hwnd, 0x11);                                // 화면 캡처(OCR)에 안 찍히게
 
         loading = true;
@@ -200,7 +216,8 @@ sealed class Editor
         using (var c = Canvas.OnDc(mem))
         {
             c.Clear(Bg);
-            c.StrokeRound(0.5, 0.5, winW - 1, winH - 1, S(14), Border, 1);
+            c.StrokeRound(0.5, 0.5, mainW - 1, winH - 1, S(14), Border, 1);
+            DrawSpeed(c);
             // 머리
             c.FillRect(S(18), S(20), S(4), S(20), Gold);
             c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
@@ -217,7 +234,7 @@ sealed class Editor
             c.Text(S(20), ry + S(6), "신력의 휘석 1개 =", S(15), false, Muted);
             FieldBg(c, S(FieldX), ry, S(FieldW), Text(rateEdit), true);
             c.Text(S(FieldX + FieldW + 12), ry + S(7), "결정", S(13), false, Dim);
-            c.Line(S(18), S(Header + 44), winW - S(18), S(Header + 44), Line_);
+            c.Line(S(18), S(Header + 44), mainW - S(18), S(Header + 44), Line_);
             // 항목
             double rate = RateInput();
             foreach (var r in rows)
@@ -238,7 +255,7 @@ sealed class Editor
                 c.Text(S(FieldX + FieldW + 12), y + S(7), res, S(13), false, rc);
             }
             // 아래
-            c.Line(S(18), footerY, winW - S(18), footerY, Line_);
+            c.Line(S(18), footerY, mainW - S(18), footerY, Line_);
             c.Text(S(20), footerY + S(22), status, S(13), false, dirty ? Canvas.Argb(255, 220, 190, 120) : Dim);
             var (bx, by, bw, bh) = ButtonRect;
             c.FillRound(bx, by, bw, bh, S(10), Gold);
@@ -249,6 +266,25 @@ sealed class Editor
         BitBlt(dc, 0, 0, winW, winH, mem, 0, 0, SRCCOPY);
         SelectObject(mem, old); DeleteObject(bmp); DeleteDC(mem);
         EndPaint(Hwnd, ref ps);
+    }
+
+    /// <summary>자동 읽기 칸: 몇 초마다 모든 칸을 다시 읽을지 (누르면 바로 적용·저장).</summary>
+    void DrawSpeed(Canvas c)
+    {
+        var (sx, sy, sw, sh) = SideRect;
+        c.FillRound(sx, sy, sw, sh, S(14), Bg);
+        c.StrokeRound(sx + 0.5, sy + 0.5, sw - 1, sh - 1, S(14), Border, 1);
+        c.FillRect(sx + S(14), sy + S(16), S(4), S(18), Gold);
+        c.Text(sx + S(24), sy + S(12), "자동 읽기", S(16), true, Txt);
+        for (int i = 0; i < Speeds.Length; i++)
+        {
+            var (x, y, w, h) = SpeedRect(i);
+            bool on = Math.Abs(cfg.RereadSec - Speeds[i].sec) < 1e-6;
+            c.FillRound(x, y, w, h, S(8), on ? Gold : Field);
+            var (lw, lh) = c.Measure(Speeds[i].label, S(14), on);
+            c.Text(x + (w - lw) / 2, y + (h - lh) / 2, Speeds[i].label, S(14), on, on ? GoldText : Txt);
+        }
+        c.Text(sx + S(14), sy + sh - S(26), "틀린 값을 바로잡음", S(12), false, Dim);
     }
 
     void FieldBg(Canvas c, int x, int y, int w, string text, bool accent)
@@ -316,12 +352,21 @@ sealed class Editor
             {
                 var p = new POINT { X = (short)(l.ToInt64() & 0xFFFF), Y = (short)((l.ToInt64() >> 16) & 0xFFFF) };
                 ScreenToClient(Hwnd, ref p);
-                if (p.Y < S(Header - 6) && !(ShopMode == false && In(CloseRect, p.X, p.Y))) return new IntPtr(2); // 머리 = 끌어서 이동
+                if (p.X < mainW && p.Y < S(Header - 6) && !(ShopMode == false && In(CloseRect, p.X, p.Y))) return new IntPtr(2); // 머리 = 끌어서 이동
                 return new IntPtr(1);
             }
             case WM_LBUTTONUP:
             {
                 int x = (short)(l.ToInt64() & 0xFFFF), y = (short)((l.ToInt64() >> 16) & 0xFFFF);
+                for (int i = 0; i < Speeds.Length; i++)
+                    if (In(SpeedRect(i), x, y))
+                    {
+                        cfg.RereadSec = Speeds[i].sec;
+                        try { App.SaveSettings(cfg); } catch { }
+                        App.Log("자동 읽기: " + Speeds[i].label);
+                        InvalidateRect(Hwnd, IntPtr.Zero, false);
+                        return IntPtr.Zero;
+                    }
                 if (In(ButtonRect, x, y)) Apply();
                 else if (!ShopMode && In(CloseRect, x, y)) Destroy();
                 return IntPtr.Zero;

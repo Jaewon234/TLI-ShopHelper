@@ -81,6 +81,47 @@ public sealed class Tracker
     }
 
     public const double StableMs = 40, MaxWaitMs = 400, RetryMs = 500;
+    double lastRescan;
+    int rescanIdx = -1;   // 이번 바퀴에서 다음에 읽을 칸 (-1 = 쉬는 중)
+
+    /// <summary>
+    /// 자동 읽기 (TartarusSolver 처럼 몇 초마다): 바뀐 칸이 없어도 모든 칸을 다시 읽어서,
+    /// 처음에 잘못 읽고 기억해 둔 값이 있으면 바로잡음.
+    /// </summary>
+    bool Rescan(Frame f, double now)
+    {
+        if (slots == null || cfg.RereadSec <= 0) { rescanIdx = -1; return false; }
+        if (slots.Any(s => s.Pending)) return false;   // 새로고침 처리 중이면 끝난 뒤에
+        if (rescanIdx < 0)
+        {
+            if (now - lastRescan < cfg.RereadSec * 1000) return false;
+            lastRescan = now; rescanIdx = 0;            // 새 바퀴 시작
+        }
+        // 한 번에 한 칸씩 (모든 칸을 한꺼번에 읽으면 그동안 새로고침 감지가 멈춤)
+        bool changed = false;
+        if (rescanIdx >= slots.Count) { rescanIdx = -1; return false; }
+        foreach (var s in new[] { slots[rescanIdx++] })
+        {
+            if (rescanIdx >= slots.Count) rescanIdx = -1;
+            var card = OcrSlot(f, s);
+            if (card == null) continue;                 // 못 읽으면 지금 결과 유지
+            var old = s.Card;
+            if (old != null && old.Name == card.Name && old.Qty == card.Qty && old.Price == card.Price && old.Sold == card.Sold) continue;
+            Log?.Invoke($"다시 읽기로 고침: {Describe1(old)} → {Describe1(card)}");
+            s.Card = card; s.Stale = false; s.Fails = 0;
+            // 기억해 둔 값도 고침 (같은 그림이면 다음부터 맞는 값)
+            if (s.SettledFp != null && s.SettledPfp != null)
+            {
+                cache.RemoveAll(e => Fingerprint.DiffCells(e.Pfp, s.SettledPfp) == 0 && Fingerprint.DiffCells(e.Fp, s.SettledFp) <= Fingerprint.Cells(s.SettledFp) / 100);
+                cache.Add(new CacheEntry { Fp = s.SettledFp, Pfp = s.SettledPfp, Card = card.Clone() });
+            }
+            changed = true;
+        }
+        if (changed) CountPage();
+        return changed;
+    }
+
+    static string Describe1(Card? c) => c == null ? "(없음)" : c.Sold ? $"{c.Name} 매진" : $"{c.Name} x{c.Qty} {c.Price}휘";
 
     /// <summary>칸 위치를 알면 그 줄 범위만 캡처하면 됨 (null 이면 전체).</summary>
     public (int From, int To)? Rows => slots == null || slots.Count == 0 ? null
@@ -115,6 +156,7 @@ public sealed class Tracker
         {
             if (now < nextFullScan) return false;
             FullScan(f, now);
+            lastRescan = now;
             return true;
         }
 
@@ -155,6 +197,7 @@ public sealed class Tracker
             }
         }
 
+        if (!dirty && Rescan(f, now)) dirty = true;
         if (dirty && batchStart != null && slots.All(s => !s.Pending))
         {
             LastLatencyMs = now - batchStart.Value;

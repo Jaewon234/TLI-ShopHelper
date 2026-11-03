@@ -275,7 +275,7 @@ sealed class Overlay
         try
         {
             var n = App.LoadConfig();
-            cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost; cfg.CrystalRate = n.CrystalRate;
+            cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost; cfg.CrystalRate = n.CrystalRate; cfg.RereadSec = n.RereadSec;
             Engine?.Reevaluate();
             Notify("시세 설정 반영됨", $"파일 변경 감지 (항목 {n.Items.Count}개)");
             return true;
