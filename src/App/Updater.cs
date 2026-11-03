@@ -59,7 +59,8 @@ static class Updater
     }
 
     /// <summary>zip 을 받아 확인하고 풀어서, 새 ShopHelper.exe 가 있는 폴더를 돌려줌.</summary>
-    public static async Task<string> Download(Release r)
+    /// <summary>progress(받은 바이트, 전체 바이트), stage(단계 이름)</summary>
+    public static async Task<string> Download(Release r, Action<long, long>? progress = null, Action<string>? stage = null)
     {
         if (r.Url == null) throw new InvalidOperationException($"릴리스 {r.Tag} 에 {AssetName} 이 없음");
         if (r.Sha256 == null) throw new InvalidOperationException($"릴리스 {r.Tag} 의 {AssetName} 에 확인값(SHA-256)이 없음");
@@ -74,15 +75,20 @@ static class Updater
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             var buf = new byte[1 << 16];
             int n;
+            long total = resp.Content.Headers.ContentLength ?? r.Size, got0 = 0;
             while ((n = await src.ReadAsync(buf)) > 0)
             {
                 hash.AppendData(buf, 0, n);
                 await file.WriteAsync(buf.AsMemory(0, n));
+                got0 += n;
+                progress?.Invoke(got0, total);
             }
+            stage?.Invoke("파일 확인 중 (SHA-256)");
             string got = Convert.ToHexString(hash.GetHashAndReset());
             if (!got.Equals(r.Sha256, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException("받은 파일의 확인값이 다름 (다운로드가 깨졌거나 바뀜)");
         }
+        stage?.Invoke("압축 푸는 중");
         string unpacked = Path.Combine(Staging, "unpacked");
         ZipFile.ExtractToDirectory(zip, unpacked);
         File.Delete(zip);
@@ -97,7 +103,7 @@ static class Updater
         string target = App.Dir.TrimEnd(Path.DirectorySeparatorChar);
         Process.Start(new ProcessStartInfo(Path.Combine(newDir, "ShopHelper.exe"))
         {
-            ArgumentList = { "--install-update", target, Environment.ProcessId.ToString() },
+            ArgumentList = { "--install-update", target, Environment.ProcessId.ToString(), App.Version },
             UseShellExecute = false,
             WorkingDirectory = newDir,
         });
@@ -107,7 +113,7 @@ static class Updater
     /// "--install-update 설치폴더 pid": 새 버전(임시 폴더)에서 실행됨. 이전 버전이 끝나길 기다린 뒤
     /// 자기 파일을 설치 폴더에 복사하고 그 자리에서 다시 시작.
     /// </summary>
-    public static int InstallHere(string target, int pid)
+    public static int InstallHere(string target, int pid, string? fromVersion = null)
     {
         App.Log($"업데이트 설치: {App.Dir} → {target} (이전 pid {pid})");
         try
@@ -126,7 +132,9 @@ static class Updater
                     catch (IOException) when (attempt < 20) { Thread.Sleep(500); }   // 이전 exe 가 아직 잠겨 있으면 잠시 기다림
                 }
             }
-            Process.Start(new ProcessStartInfo(Path.Combine(target, "ShopHelper.exe")) { UseShellExecute = false, WorkingDirectory = target });
+            var start = new ProcessStartInfo(Path.Combine(target, "ShopHelper.exe")) { UseShellExecute = false, WorkingDirectory = target };
+            if (fromVersion != null) { start.ArgumentList.Add("--updated-from"); start.ArgumentList.Add(fromVersion); }   // 다시 켜지면 '완료' 표시
+            Process.Start(start);
             return 0;
         }
         catch (Exception e)

@@ -9,7 +9,7 @@ namespace ShopHelper;
 /// </summary>
 sealed class Overlay
 {
-    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5;
+    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5, MSG_INSTALL = WM_APP + 6;
     // 색 (ARGB)
     static readonly uint Green = Canvas.Argb(255, 34, 197, 94), Red = Canvas.Argb(255, 239, 68, 68),
         Amber = Canvas.Argb(255, 245, 158, 11), Muted = Canvas.Argb(255, 150, 155, 165), Dim = Canvas.Argb(255, 110, 115, 125),
@@ -21,6 +21,8 @@ sealed class Overlay
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     volatile Updater.Release? update;
+    public string? UpdatedFrom;
+    readonly ProgressWindow progress = new();
     volatile bool installing;
     /// <summary>오버레이가 화면 캡처에서 빠졌는지 (null = 아직 확인 전).</summary>
     public volatile object? CaptureExcludedBox;
@@ -95,6 +97,8 @@ sealed class Overlay
         var ec = wc; ec.lpszClassName = "ShopHelperEditor"; ec.hbrBackground = CreateSolidBrush(Rgb(14, 16, 22));
         ec.hCursor = LoadCursorW(IntPtr.Zero, new IntPtr(32512));
         RegisterClassExW(ref ec);
+        var pc = ec; pc.lpszClassName = "ShopHelperProgress";
+        RegisterClassExW(ref pc);
 
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
@@ -110,6 +114,12 @@ sealed class Overlay
         editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
         editor.Init("ShopHelperEditor", inst);
         onReady();
+        if (UpdatedFrom != null)
+        {
+            App.Log($"업데이트 완료: v{UpdatedFrom} → v{App.Version}");
+            string from = UpdatedFrom;
+            new Thread(() => Info($"업데이트 완료\n\nv{from} → v{App.Version}\n\n시세는 그대로 유지됩니다.")) { IsBackground = true }.Start();
+        }
         // 업데이트 확인: 켠 뒤 10초, 그 뒤 6시간마다
         new Thread(() =>
         {
@@ -195,7 +205,8 @@ sealed class Overlay
                 if (manual)
                 {
                     // 직접 누른 확인은 알림 대신 창으로 (알림이 꺼져 있어도 보이게)
-                    if (Ask($"새 버전 {r.Tag} 이 있습니다. (지금 v{App.Version})\n\n지금 설치할까요? 시세는 그대로 유지됩니다.")) StartInstall();
+                    if (Ask($"새 버전 {r.Tag} 이 있습니다. (지금 v{App.Version})\n\n지금 설치할까요? 시세는 그대로 유지됩니다."))
+                        PostMessageW(msgWnd, MSG_INSTALL, IntPtr.Zero, IntPtr.Zero);
                 }
                 else Notify($"새 버전 {r.Tag} 이 있습니다", "이 알림을 누르거나 트레이 메뉴 > 업데이트 를 누르세요. 시세는 그대로 유지됩니다.");
             }
@@ -224,13 +235,19 @@ sealed class Overlay
             return;
         }
         installing = true;
-        Notify($"{r.Tag} 받는 중...", "끝나면 자동으로 다시 시작합니다.");
+        progress.Show("ShopHelperProgress", inst, $"업데이트 v{App.Version} → {r.Tag}");
         new Thread(() =>
         {
             try
             {
-                string dir = Updater.Download(r).GetAwaiter().GetResult();
+                progress.Set("받는 중...", "", 0);
+                string dir = Updater.Download(r,
+                    (got, total) => progress.Set("받는 중...", $"{got / 1048576.0:0.0} / {total / 1048576.0:0.0} MB ({(total > 0 ? got * 100 / total : 0)}%)",
+                        total > 0 ? (double)got / total : -1),
+                    st => progress.Set(st, "", 1)).GetAwaiter().GetResult();
                 App.Log($"업데이트 {r.Tag} 받음 → {dir}");
+                progress.Set("설치 준비 완료 · 다시 시작합니다", "잠시 뒤 새 버전이 켜지면 '업데이트 완료' 창이 뜹니다.", 1, done: true);
+                Thread.Sleep(1200);
                 Updater.Launch(dir);
                 PostMessageW(msgWnd, MSG_QUIT, IntPtr.Zero, IntPtr.Zero);   // 새 버전이 이 프로그램이 끝나길 기다림
             }
@@ -238,7 +255,7 @@ sealed class Overlay
             {
                 App.Log("업데이트 실패: " + e);
                 installing = false;
-                Info("업데이트를 받지 못했습니다.\n\n" + e.Message);
+                progress.Set("업데이트 실패", e.Message, -1, failed: true);
             }
         }) { IsBackground = true, Name = "install" }.Start();
     }
@@ -268,6 +285,7 @@ sealed class Overlay
         try
         {
             if (editor?.Handle(h, msg, w, l) is IntPtr handled) return handled;
+            if (progress.Handle(h, msg, w, l) is IntPtr handled2) return handled2;
             switch (msg)
             {
                 case 0x312: // WM_HOTKEY
@@ -300,6 +318,9 @@ sealed class Overlay
                         else editor.CloseShop();
                     }
                     Render(); // 이익 카드를 시세 창 위로 옮김
+                    return IntPtr.Zero;
+                case MSG_INSTALL:
+                    StartInstall();
                     return IntPtr.Zero;
                 case MSG_QUIT:
                     PostQuitMessage(0);
