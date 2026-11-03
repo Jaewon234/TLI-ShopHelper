@@ -188,8 +188,20 @@ sealed class Overlay
         AppendMenuW(menu, 0, (UIntPtr)9, "종료");
         GetCursorPos(out var p);
         SetForegroundWindow(msgWnd);
-        // TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NOANIMATION: 애니메이션 없이 바로 뜸
-        int cmd = TrackPopupMenu(menu, 0x100 | 0x2 | 0x4000, p.X, p.Y, 0, msgWnd, IntPtr.Zero);
+        // 작업 표시줄과 겹치지 않게: 마우스가 있는 모니터의 작업 영역(작업 표시줄 제외) 안쪽 끝에 붙여서 띄움
+        uint flags = 0x100 | 0x2 | 0x4000;   // TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NOANIMATION (바로 뜸)
+        int mx = p.X, my = p.Y;
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (GetMonitorInfoW(MonitorFromPoint(p, 2 /*NEAREST*/), ref mi))
+        {
+            var wa = mi.rcWork;
+            if (p.Y >= wa.Bottom) { my = wa.Bottom - 6; flags |= 0x20; }          // 작업 표시줄이 아래: 메뉴 아래 끝을 그 위에 (TPM_BOTTOMALIGN)
+            else if (p.Y < wa.Top) { my = wa.Top + 6; }                          // 위
+            if (p.X >= wa.Right) { mx = wa.Right - 6; flags |= 0x8; }            // 오른쪽 (TPM_RIGHTALIGN)
+            else if (p.X < wa.Left) { mx = wa.Left + 6; }                        // 왼쪽
+            else if (p.X > (wa.Left + wa.Right) / 2) flags |= 0x8;              // 화면 오른쪽 절반이면 메뉴를 왼쪽으로 펼침
+        }
+        int cmd = TrackPopupMenu(menu, flags, mx, my, 0, msgWnd, IntPtr.Zero);
         PostMessageW(msgWnd, 0 /*WM_NULL*/, IntPtr.Zero, IntPtr.Zero);   // 메뉴 밖을 눌렀을 때 바로 닫히고 클릭이 씹히지 않게 (Windows 권장)
         DestroyMenu(menu);
         switch (cmd)
