@@ -538,7 +538,8 @@ sealed class Overlay
                 case Verdict.Good:
                     c.Glow(d.X1, d.Y1, d.W, d.H, rr, Green, (int)Math.Max(6, th * 0.5));
                     c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Green, Math.Max(3, th * 0.18));
-                    c.Pill(d.Cx, d.Y1, "구매  " + Gain(cd.Diff!.Value), big, true, Green, Canvas.Argb(255, 6, 30, 14));
+                    string buy = "구매 " + Gain(cd.Diff!.Value);
+                    c.Pill(d.Cx, d.Y1, buy, FitPx(c, buy, big * 0.92, d.W * 0.96, small), true, Green, Canvas.Argb(255, 6, 30, 14));
                     if (cd.Item?.IsGamble == true)
                         c.Pill(d.Cx, d.Y1 + big * 1.6, GambleLine(cd), tiny, true, Canvas.Argb(215, 6, 30, 14), Canvas.Argb(255, 190, 240, 205));
                     break;
@@ -584,6 +585,17 @@ sealed class Overlay
         c.Text(x + 14 * sc, y + 12 * sc, "순이익", 13 * sc, true, Muted);
         c.Text(x + 14 * sc + lw + 10 * sc, y + 6 * sc, value, 22 * sc, true, net > 0 ? Green : net < 0 ? Red : Txt);
         c.Text(x + 14 * sc, y + 38 * sc, sub, 12 * sc, false, Dim);
+    }
+
+    /// <summary>알약 표시가 카드 폭(maxW) 안에 들어가는 글자 크기 (옆 칸과 겹치지 않게)</summary>
+    static double FitPx(Canvas c, string text, double px, double maxW, double minPx)
+    {
+        for (; px > minPx; px -= 0.5)
+        {
+            var (tw, _) = c.Measure(text, px, true);
+            if (tw + px * 1.2 <= maxW) break;   // Pill 의 좌우 여백 = 글자 크기 × 0.6 씩
+        }
+        return Math.Max(px, minPx);
     }
 
     string Efficiency(Card cd)
