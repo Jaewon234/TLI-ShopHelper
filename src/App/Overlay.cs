@@ -73,11 +73,15 @@ sealed class Overlay
     public void Run(Action onReady)
     {
         inst = GetModuleHandleW(null);
-        icon = LoadIconW(IntPtr.Zero, new IntPtr(32516)); // IDI_INFORMATION
+        // exe 에 넣은 아이콘 (작은 것 = 트레이, 큰 것 = 창). 못 읽으면 기본 아이콘
+        IntPtr big = IntPtr.Zero, small = IntPtr.Zero;
+        try { if (Environment.ProcessPath is string exe) ExtractIconExW(exe, 0, out big, out small, 1); } catch { }
+        icon = small != IntPtr.Zero ? small : LoadIconW(IntPtr.Zero, new IntPtr(32516));
+        var bigIcon = big != IntPtr.Zero ? big : icon;
         var wc = new WNDCLASSEX
         {
             cbSize = Marshal.SizeOf<WNDCLASSEX>(), lpfnWndProc = proc, hInstance = inst,
-            lpszClassName = "ShopHelperOverlay", hIcon = icon, hIconSm = icon,
+            lpszClassName = "ShopHelperOverlay", hIcon = bigIcon, hIconSm = icon,
         };
         RegisterClassExW(ref wc);
         var ec = wc; ec.lpszClassName = "ShopHelperEditor"; ec.hbrBackground = new IntPtr(16); // COLOR_BTNFACE+1
