@@ -6,12 +6,6 @@ namespace ShopHelper;
 /// <summary>UE_game.log 끝에 추가되는 줄만 읽어서 상점 열림/닫힘을 알림 (30ms 간격).</summary>
 sealed class LogWatcher
 {
-    static readonly Regex Open = new(@"Page@ OpenView GroceryStoreV3\s*$", RegexOptions.Compiled);
-    static readonly Regex Close = new(@"Page@ CloseView \d+_GroceryStoreV3Ctrl", RegexOptions.Compiled);
-
-    static readonly Regex AnyOpen = new(@"Page@ OpenView (\S+)\s*$", RegexOptions.Compiled);
-    static readonly Regex AnyClose = new(@"Page@ CloseView \d+_(\S+?)Ctrl\s*$", RegexOptions.Compiled);
-
     readonly string path;
     readonly Action<bool> onChange;
     /// <summary>상점 말고 다른 창이 열리고 닫힐 때 (이름, 열림)</summary>
@@ -41,8 +35,9 @@ sealed class LogWatcher
             fs.ReadExactly(buf);
             foreach (var line in Encoding.UTF8.GetString(buf).Split('\n'))
             {
-                if (Open.IsMatch(line.TrimEnd('\r'))) IsOpen = true;
-                else if (Close.IsMatch(line)) IsOpen = false;
+                var (ev, _) = LogLine.Parse(line.TrimEnd('\r'));
+                if (ev == LogEv.ShopOpen) IsOpen = true;
+                else if (ev == LogEv.ShopClose) IsOpen = false;
             }
             return size;
         }
@@ -85,17 +80,29 @@ sealed class LogWatcher
         }
     }
 
+    const string ShopCovered = "상점 가려짐";
+    bool covered;
+
     void Handle(string line)
     {
         if (stopped) return;
-        if (IsOpen && OnView != null)
+        var (ev, name) = LogLine.Parse(line);
+        switch (ev)
         {
-            var mo = AnyOpen.Match(line);
-            if (mo.Success && mo.Groups[1].Value != "GroceryStoreV3") OnView(mo.Groups[1].Value, true);
-            var mc = AnyClose.Match(line);
-            if (mc.Success && mc.Groups[1].Value != "GroceryStoreV3") OnView(mc.Groups[1].Value, false);
+            case LogEv.ShopOpen:
+                if (!IsOpen) { IsOpen = true; covered = false; onChange(true); }
+                else if (covered) { covered = false; OnView?.Invoke(ShopCovered, false); }   // 다른 화면에서 상점으로 돌아옴
+                break;
+            case LogEv.ShopClose:
+                if (IsOpen) { IsOpen = false; covered = false; onChange(false); }
+                break;
+            case LogEv.ShopHidden:
+                if (IsOpen && !covered) { covered = true; OnView?.Invoke(ShopCovered, true); }
+                break;
+            case LogEv.ViewOpen:
+            case LogEv.ViewClose:
+                if (IsOpen) OnView?.Invoke(name, ev == LogEv.ViewOpen);
+                break;
         }
-        if (Open.IsMatch(line)) { if (!IsOpen) { IsOpen = true; onChange(true); } }
-        else if (Close.IsMatch(line)) { if (IsOpen) { IsOpen = false; onChange(false); } }
     }
 }

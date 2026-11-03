@@ -499,6 +499,21 @@ static class T
         Check(c3.Items.Single(i => i.Name == "에너지 코어").Price == 0.05 && File.Exists(sp), "설정 파일이 없어도 시세는 그대로");
         Directory.Delete(dir, true);
 
+        Console.WriteLine("\n[게임 로그 줄 해석]");
+        {
+            const string P = "[2026.11.03-22.17.14:500][122]TLLua: Display: [Game] ";
+            Check(LogLine.Parse(P + "TipMsgShowMgr@DispatchPageRunChange PageName = GroceryStoreV3 , PageRunState = Run ").Ev == LogEv.ShopOpen, "새 형식: 상점 Run → 열림");
+            Check(LogLine.Parse(P + "TipMsgShowMgr@DispatchPageRunChange PageName = GroceryStoreV3 , PageRunState = Destory ").Ev == LogEv.ShopClose, "새 형식: 상점 Destory → 닫힘");
+            Check(LogLine.Parse(P + "TipMsgShowMgr@DispatchPageRunChange PageName = GroceryStoreV3 , PageRunState = Hide ").Ev == LogEv.ShopHidden, "새 형식: 상점 Hide → 가려짐");
+            var lv = LogLine.Parse(P + "TipMsgShowMgr@DispatchPageRunChange PageName = DialogueTalk , PageRunState = Run ");
+            Check(lv.Ev == LogEv.ViewOpen && lv.Name == "DialogueTalk", "새 형식: 다른 창 Run → 창 열림");
+            Check(LogLine.Parse(P + "TipMsgShowMgr@DispatchPageRunChange PageName = DialogueTalk , PageRunState = Destory ").Ev == LogEv.ViewClose, "새 형식: 다른 창 Destory → 창 닫힘");
+            Check(LogLine.Parse(P + "PageBase@ OpenFlow5! OpenView GroceryStoreV3").Ev == LogEv.None, "새 형식 OpenFlow 줄은 중복으로 세지 않음");
+            Check(LogLine.Parse(P + "PageStack@ CurRunView = 346459_GroceryStoreV3Ctrl").Ev == LogEv.None, "관계없는 줄 무시");
+            Check(LogLine.Parse(P + "Page@ OpenView GroceryStoreV3").Ev == LogEv.ShopOpen, "옛 형식: 열림");
+            Check(LogLine.Parse(P + "Page@ CloseView 123_GroceryStoreV3Ctrl").Ev == LogEv.ShopClose, "옛 형식: 닫힘");
+        }
+
         Console.WriteLine(fails == 0 ? "\n모든 테스트 통과" : $"\n실패 {fails}개");
         return fails;
     }
