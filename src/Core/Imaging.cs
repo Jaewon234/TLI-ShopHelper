@@ -50,6 +50,27 @@ public sealed class Frame
         return f;
     }
 
+    /// <summary>자동 대비: 밝기 하위 2%~상위 98% 를 0~255 로 늘림 (어두워진 칸도 OCR 이 읽게).</summary>
+    public Frame AutoContrast()
+    {
+        var hist = new int[256];
+        int n = W * H;
+        for (int i = 0; i < Px.Length; i += 4) hist[(Px[i] * 29 + Px[i + 1] * 150 + Px[i + 2] * 77) >> 8]++;
+        int lo = 0, hi = 255, acc = 0;
+        for (; lo < 255; lo++) { acc += hist[lo]; if (acc > n * 0.02) break; }
+        acc = 0;
+        for (; hi > 0; hi--) { acc += hist[hi]; if (acc > n * 0.02) break; }
+        var f = new Frame(W, H);
+        if (hi - lo < 8) { Buffer.BlockCopy(Px, 0, f.Px, 0, Px.Length); return f; }
+        var lut = new byte[256];
+        for (int v = 0; v < 256; v++) lut[v] = (byte)Math.Clamp((v - lo) * 255 / (hi - lo), 0, 255);
+        for (int i = 0; i < Px.Length; i += 4)
+        {
+            f.Px[i] = lut[Px[i]]; f.Px[i + 1] = lut[Px[i + 1]]; f.Px[i + 2] = lut[Px[i + 2]]; f.Px[i + 3] = 255;
+        }
+        return f;
+    }
+
     public void DrawRect(Box b, byte r, byte g, byte bl, int t = 3)
     {
         int x1 = (int)b.X1, y1 = (int)b.Y1, x2 = (int)b.X2, y2 = (int)b.Y2;
@@ -95,7 +116,26 @@ public static class Fingerprint
                 }
                 fp[2 + cy * cw + cx] = (byte)(sum / (Cell * Cell));
             }
+        Normalize(fp);
         return fp;
+    }
+
+    /// <summary>
+    /// 밝기·대비 정규화 (평균 128, 표준편차 48). 마우스를 올려 카드가 어두워지거나(=밝기/대비만 변함)
+    /// 반짝여도 같은 그림으로 봄. 글자/숫자가 바뀌면 모양이 달라져서 그대로 잡힘.
+    /// </summary>
+    static void Normalize(byte[] fp)
+    {
+        int n = fp.Length - 2;
+        if (n <= 0) return;
+        double mean = 0;
+        for (int i = 2; i < fp.Length; i++) mean += fp[i];
+        mean /= n;
+        double var = 0;
+        for (int i = 2; i < fp.Length; i++) var += (fp[i] - mean) * (fp[i] - mean);
+        double std = Math.Sqrt(var / n);
+        for (int i = 2; i < fp.Length; i++)
+            fp[i] = std < 2 ? (byte)128 : (byte)Math.Clamp(128 + (fp[i] - mean) / std * 48, 0, 255);
     }
 
     /// <summary>차이가 큰 셀 개수. 크기가 다르면 int.MaxValue.</summary>

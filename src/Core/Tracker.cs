@@ -64,7 +64,7 @@ public sealed class Tracker
     public string Status { get; private set; } = "";
     public Action<string>? Log;
 
-    public const double StableMs = 40, MaxWaitMs = 400;
+    public const double StableMs = 40, MaxWaitMs = 400, RetryMs = 500;
 
     /// <summary>칸 위치를 알면 그 줄 범위만 캡처하면 됨 (null 이면 전체).</summary>
     public (int From, int To)? Rows => slots == null || slots.Count == 0 ? null
@@ -108,7 +108,12 @@ public sealed class Tracker
             var fp = Fingerprint.Make(f, s.R);
             var pfp = Fingerprint.Make(f, s.PriceR);
             cellsAll = Fingerprint.Cells(fp);
-            if (!s.Pending)
+            if (!s.Pending && s.Card == null && now - s.ChangeT >= RetryMs)
+            {
+                // 못 읽은 칸은 0.5초마다 다시 시도
+                s.Pending = true; s.ChangeT = now - StableMs; s.PrevFp = fp; s.PrevPfp = pfp;
+            }
+            else if (!s.Pending)
             {
                 bool changed = Fingerprint.DiffCells(fp, s.SettledFp) > Math.Max(2, cellsAll / 50)
                                || Fingerprint.DiffCells(pfp, s.SettledPfp) > 0;
@@ -127,7 +132,7 @@ public sealed class Tracker
                 double age = now - s.ChangeT;
                 if ((stable && age >= StableMs) || age >= MaxWaitMs)
                 {
-                    Resolve(f, s, fp, pfp);
+                    Resolve(f, s, fp, pfp, now);
                     dirty = true;
                 }
             }
@@ -148,9 +153,10 @@ public sealed class Tracker
         return dirty;
     }
 
-    void Resolve(Frame f, Slot s, byte[] fp, byte[] pfp)
+    void Resolve(Frame f, Slot s, byte[] fp, byte[] pfp, double now)
     {
         s.Pending = false;
+        s.ChangeT = now;
         s.SettledFp = fp; s.SettledPfp = pfp;
         int cells = Fingerprint.Cells(fp);
         foreach (var e in cache)
@@ -172,7 +178,7 @@ public sealed class Tracker
 
     Card? OcrSlot(Frame f, Slot s)
     {
-        var crop = f.Crop((int)s.R.X1, (int)s.R.Y1, (int)s.R.W, (int)s.R.H);
+        var crop = f.Crop((int)s.R.X1, (int)s.R.Y1, (int)s.R.W, (int)s.R.H).AutoContrast();
         double sc = Math.Min(cfg.SlotOcrScale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
         var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
         var lines = ocr.Recognize(img, s.R, sc);
@@ -248,12 +254,15 @@ public sealed class Tracker
             double near = cx.OrderBy(c => Math.Abs(c - x)).First();
             centers.Add(Math.Abs(near - x) < spacing * 0.3 ? near : x);
         }
-        double half = spacing * 0.47;
+        // 비교 범위는 카드 안쪽만 (카드 폭 ≈ 간격의 83%). 카드 밖 배경이 섞이면
+        // 마우스를 올려 카드만 어두워질 때 '바뀐 것'으로 잘못 잡힘.
+        double half = spacing * 0.40;
+        double dhalf = spacing * 0.44;
         return centers.Select(c => new Slot
         {
-            R = new Box(c - half, py1 - 4.6 * h, c + half, py2 + 0.4 * h),
-            PriceR = new Box(c - half, py1 - 0.3 * h, c + half, py2 + 0.3 * h),
-            D = new Box(c - half * 1.02, py1 - 12.3 * h, c + half * 1.02, py2 + 0.6 * h),
+            R = new Box(c - half, py1 - 4.6 * h, c + half, py2 + 0.2 * h),
+            PriceR = new Box(c - half, py1 - 0.2 * h, c + half, py2 + 0.2 * h),
+            D = new Box(c - dhalf, py1 - 12.3 * h, c + dhalf, py2 + 0.6 * h),
         }).ToList();
     }
 

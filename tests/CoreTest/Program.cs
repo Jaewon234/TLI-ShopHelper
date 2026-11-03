@@ -28,6 +28,8 @@ sealed class Scene
         return s;
     }
 
+    public Box? Hover;   // 마우스를 올린 카드 (어둡게)
+
     public Frame Render()
     {
         var f = new Frame(1920, 1080);
@@ -43,6 +45,13 @@ sealed class Scene
                     int o = (y * f.W + x) * 4; f.Px[o] = v; f.Px[o + 1] = v; f.Px[o + 2] = v;
                 }
         }
+        if (Hover is Box hb)   // 게임처럼 카드 전체를 회색 쪽으로 어둡게: p' = 0.6p + 40
+            for (int y = (int)hb.Y1; y < (int)hb.Y2; y++)
+                for (int x = (int)hb.X1; x < (int)hb.X2; x++)
+                {
+                    int o = (y * f.W + x) * 4;
+                    for (int c = 0; c < 3; c++) f.Px[o + c] = (byte)(f.Px[o + c] * 0.6 + 40);
+                }
         return f;
     }
 }
@@ -133,6 +142,26 @@ static class T
         Check(snap.Slots[0].Card?.Price == 68, "68 감지");
         Check(ocr.Calls == 1, $"OCR 1번 - 실제 {ocr.Calls}");
         Check(snap.Pages >= 3, $"본 화면 수 {snap.Pages}");
+
+        Console.WriteLine("[5b] 마우스 올림 (카드가 어두워짐) → 다시 읽지 않고 결과 유지");
+        ocr.Calls = 0;
+        foreach (int k in new[] { 5, 0, 7 })
+        {
+            double cx = new[] { 443.0, 576, 709, 841, 974, 1107, 1240, 1372 }[k];
+            var hs = Scene.Make(NamesA, p); hs.Hover = new Box(cx - 55, 137, cx + 55, 329);
+            Run(tr, ocr, hs, ref now, 10);
+        }
+        Run(tr, ocr, Scene.Make(NamesA, p), ref now, 10);   // 마우스 치움
+        snap = tr.Snap();
+        Check(ocr.Calls == 0, $"OCR 0번 - 실제 {ocr.Calls}");
+        Check(snap.Slots[5].Card?.Price == 390 && snap.Slots[0].Card?.Price == 68 && snap.Slots[7].Card?.Price == 200, "결과 유지");
+
+        Console.WriteLine("[5c] 자동 대비");
+        var dim = new Frame(4, 1);
+        byte[] vals = { 60, 70, 80, 90 };
+        for (int i = 0; i < 4; i++) { dim.Px[i * 4] = dim.Px[i * 4 + 1] = dim.Px[i * 4 + 2] = vals[i]; }
+        var ac = dim.AutoContrast();
+        Check(ac.Px[0] < 10 && ac.Px[12] > 245, $"60~90 → {ac.Px[0]}~{ac.Px[12]}");
 
         Console.WriteLine("[6] 시세 모드 변경 후 재평가");
         cfg.Mode = "resell"; tr.Reevaluate();
