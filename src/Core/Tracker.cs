@@ -5,6 +5,8 @@ public interface IOcr
     int MaxDim { get; }
     /// <summary>이미지를 읽어 줄 단위 단어 목록을 돌려줌 (이미지 좌표). src/scale 은 테스트용 정보.</summary>
     List<List<OcrWord>> Recognize(Frame img, Box src, double scale);
+    /// <summary>숫자용 (영어 OCR). 한국어 OCR 이 숫자를 한글/한자로 읽는 경우(200→2예, 60→匍)를 보완. 없으면 null.</summary>
+    List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale) => null;
 }
 
 public sealed class SlotView
@@ -243,33 +245,79 @@ public sealed class Tracker
         }
     }
 
+    /// <summary>영역을 잘라 대비를 올리고 확대해서 OCR. 좌표는 화면 기준으로 되돌림. digits=true 면 영어 OCR (없으면 null).</summary>
+    List<List<OcrWord>>? Read(Frame src, Box r, double scale, bool digits)
+    {
+        var crop = src.Crop((int)r.X1, (int)r.Y1, (int)r.W, (int)r.H).AutoContrast();
+        double sc = Math.Min(scale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
+        var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
+        var lines = digits ? ocr.RecognizeDigits(img, r, sc) : ocr.Recognize(img, r, sc);
+        if (lines == null) return null;
+        foreach (var ws in lines)
+            foreach (var w in ws) { w.X = w.X / sc + r.X1; w.Y = w.Y / sc + r.Y1; w.W /= sc; w.H /= sc; }
+        return lines;
+    }
+
+    /// <summary>영어 OCR 결과에서 가격(가격 줄의 숫자)과 개수(X 뒤 숫자, 또는 이름 둘째 줄의 숫자).</summary>
+    static (int? price, int? qty) DigitsFrom(List<List<OcrWord>>? en, Slot s)
+    {
+        if (en == null) return (null, null);
+        var segs = Parser.ToSegments(en);
+        double h = Math.Max(4, s.PriceR.H / 1.4);
+        int? price = null, qty = null;
+        var ps = segs.Where(g => g.B.Cx > s.R.X1 && g.B.Cx < s.R.X2 && (g.B.Y1 + g.B.Y2) / 2 > s.PriceR.Y1 - h * 0.3
+                                 && (g.B.Y1 + g.B.Y2) / 2 < s.PriceR.Y2 + h * 0.3 && Parser.IsPrice(g.Text))
+                     .OrderByDescending(g => Parser.PriceValue(g.Text).ToString().Length).FirstOrDefault();
+        if (ps != null) price = Parser.PriceValue(ps.Text);
+        foreach (var g in segs.Where(g => g.B.Cx > s.R.X1 && g.B.Cx < s.R.X2 && g.B.Y2 > s.R.Y1 && (g.B.Y1 + g.B.Y2) / 2 < s.PriceR.Y1 - h * 0.3))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(Parser.Norm(g.Text), @"[XxХх×]\s*([0-9]{1,4})$");
+            if (m.Success) { qty = int.Parse(m.Groups[1].Value); break; }
+            if (System.Text.RegularExpressions.Regex.IsMatch(Parser.Norm(g.Text), @"^[0-9]{1,4}$")) qty = int.Parse(Parser.Norm(g.Text));
+        }
+        return (price, qty);
+    }
+
     Card? OcrSlot(Frame f, Slot s)
     {
-        var crop = Src(f).Crop((int)s.R.X1, (int)s.R.Y1, (int)s.R.W, (int)s.R.H).AutoContrast();
-        double sc = Math.Min(cfg.SlotOcrScale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
-        var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
-        var lines = ocr.Recognize(img, s.R, sc);
-        foreach (var ws in lines)
-            foreach (var w in ws) { w.X = w.X / sc + s.R.X1; w.Y = w.Y / sc + s.R.Y1; w.W /= sc; w.H /= sc; }
+        var src = Src(f);
+        var lines = Read(src, s.R, cfg.SlotOcrScale, digits: false)!;
         var (cards, _) = Parser.Analyze(lines, cfg);
-        if (cards.Count == 0)
+        Card? card = cards.OrderBy(c => Math.Abs(c.B.Cx - s.R.Cx)).FirstOrDefault();
+        // 숫자는 영어 OCR 로 한 번 더 (한국어 OCR 이 200 → 2예, 60 → 匍 처럼 읽는 경우)
+        var (enPrice, enQty) = DigitsFrom(Read(src, s.R, cfg.SlotOcrScale, digits: true), s);
+        var nameLines = lines.Where(l => l.Count > 0 && l.Average(w => w.Y + w.H / 2) < s.PriceR.Y1).ToList();
+        if (card == null)
         {
             // 작은 숫자(예: 가격 6)는 칸 전체로 읽으면 놓치는 경우가 많음 → 가격 줄만 크게 확대해서 다시
-            var pr = s.PriceR;
-            var pcrop = Src(f).Crop((int)pr.X1, (int)pr.Y1, (int)pr.W, (int)pr.H).AutoContrast();
-            double psc = Math.Min(4.0, ocr.MaxDim / (double)Math.Max(pcrop.W, pcrop.H));
-            var plines = ocr.Recognize(pcrop.Scale(psc), pr, psc);
-            foreach (var ws in plines)
-                foreach (var w in ws) { w.X = w.X / psc + pr.X1; w.Y = w.Y / psc + pr.Y1; w.W /= psc; w.H /= psc; }
-            var nameLines = lines.Where(l => l.Count > 0 && l.Average(w => w.Y + w.H / 2) < pr.Y1).ToList();
+            var plines = Read(src, s.PriceR, 4.0, digits: false)!;
             (cards, _) = Parser.Analyze(nameLines.Concat(plines).ToList(), cfg);
-            if (cards.Count == 0)
+            card = cards.OrderBy(c => Math.Abs(c.B.Cx - s.R.Cx)).FirstOrDefault();
+            if (card == null && enPrice == null) enPrice = DigitsFrom(Read(src, s.PriceR, 4.0, digits: true), s).price;
+            if (card == null && enPrice is int ep0)
+            {
+                card = Parser.MakeCard(nameLines, ep0);   // 이름은 한국어, 가격은 영어 OCR
+                if (card != null) Parser.Evaluate(card, cfg);
+            }
+            if (card == null)
             {
                 Log?.Invoke("칸 읽기 실패: " + string.Join(" | ", lines.Concat(plines).Select(l => string.Join(" ", l.Select(w => w.Text)))));
                 return null;
             }
         }
-        return cards.OrderBy(c => Math.Abs(c.B.Cx - s.R.Cx)).First();
+        ApplyDigits(card, enPrice, enQty);
+        return card;
+    }
+
+    /// <summary>영어 OCR 로 읽은 가격·개수로 바로잡음.</summary>
+    void ApplyDigits(Card card, int? enPrice, int? enQty)
+    {
+        bool fixedUp = false;
+        if (!card.Sold && enPrice is int ep && ep != card.Price) { Log?.Invoke($"가격 {card.Price} → {ep} (영어 OCR)"); card.Price = ep; fixedUp = true; }
+        // 개수: 한국어 결과에 X 가 있거나 2개 이상일 때만 영어 쪽 숫자로 바로잡음 (개수 없는 상품에 엉뚱한 숫자가 붙지 않게)
+        if (enQty is int eq && eq > 0 && eq != card.Qty && (card.Qty > 1 || card.Raw.IndexOfAny(new[] { 'X', 'x', '×' }) >= 0))
+        { Log?.Invoke($"개수 {card.Qty} → {eq} (영어 OCR)"); card.Qty = eq; fixedUp = true; }
+        if (fixedUp) Parser.Evaluate(card, cfg);
     }
 
     void FullScan(Frame f, double now)
@@ -295,8 +343,18 @@ public sealed class Tracker
         foreach (var c in cards) Parser.Evaluate(c, cfg);
         slots = BuildSlots(cards, segs, f);
         refresh = rf?.B;
+        // 화면 전체도 영어 OCR 로 한 번 더 읽어 숫자 바로잡기 (상점을 처음 열 때 한 번)
+        var enAll = ocr.RecognizeDigits(img, src, sc);
+        if (enAll != null)
+            foreach (var ws in enAll)
+                foreach (var w in ws) { w.X /= sc; w.Y = w.Y / sc + top; w.W /= sc; w.H /= sc; }
         foreach (var s in slots)
         {
+            if (enAll != null)
+            {
+                var c0 = cards.FirstOrDefault(c => c.B.Cx >= s.R.X1 && c.B.Cx <= s.R.X2 && c.PriceBox.Y1 >= s.R.Y1 && c.PriceBox.Y1 <= s.R.Y2);
+                if (c0 != null) { var (p0, q0) = DigitsFrom(enAll, s); ApplyDigits(c0, p0, q0); }
+            }
             s.SettledFp = Fingerprint.Make(f, s.R);
             s.SettledPfp = Fingerprint.Make(f, s.PriceR);
             s.Card = cards.FirstOrDefault(c => c.B.Cx >= s.R.X1 && c.B.Cx <= s.R.X2 && c.PriceBox.Y1 >= s.R.Y1 && c.PriceBox.Y1 <= s.R.Y2);

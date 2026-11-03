@@ -88,6 +88,14 @@ sealed class FakeOcr : IOcr
     public HashSet<string> MissUnlessPriceOnly = new(); // 가격 줄만 크게 읽을 때만 읽히는 글자 (작은 숫자)
     public HashSet<string> NeverRead = new();          // 아예 못 읽는 글자 (매진되어 흐린 카드)
     public Dictionary<string, string> MisreadOnce = new(); // 처음 한 번만 잘못 읽는 글자 (588 → 432)
+    public Dictionary<string, string> KoMisread = new();   // 한국어 OCR 만 잘못 읽는 숫자 (200 → 2예, 60 → 匍)
+    public bool HasEnglish;
+    bool en;
+    public List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale)
+    {
+        if (!HasEnglish) return null;
+        en = true; try { return Recognize(img, src, scale); } finally { en = false; }
+    }
     public int MaxDim => 10000;
     public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
     {
@@ -95,7 +103,12 @@ sealed class FakeOcr : IOcr
         if (Fail) return new();
         bool full = src.W > 1000;
         bool priceOnly = src.H < 40;
-        string Read(string t) { if (MisreadOnce.TryGetValue(t, out var wrong)) { MisreadOnce.Remove(t); return wrong; } return t; }
+        string Read(string t)
+        {
+            if (MisreadOnce.TryGetValue(t, out var wrong)) { MisreadOnce.Remove(t); return wrong; }
+            if (!en && KoMisread.TryGetValue(t, out var kw)) return kw;
+            return t;
+        }
         var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text)) && !NeverRead.Contains(t.Text)
                                          && !(!priceOnly && MissUnlessPriceOnly.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
             .Select(t => new OcrWord(Read(t.Text), (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
@@ -292,6 +305,23 @@ static class T
         cfg8.RereadSec = 0; ocr8.Calls = 0;
         Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 80);
         Check(ocr8.Calls == 0, $"끄기면 다시 읽지 않음 - OCR {ocr8.Calls}번");
+
+        Console.WriteLine("[5d5] 한국어 OCR 이 숫자를 한글로 읽어도 영어 OCR 로 바로잡음 (200 → 2예, 60 → 匍)");
+        string[][] n9 = {
+            new[]{"최초의 불꽃","결정"}, new[]{"승화의 쐐기(매","직) X 20"}, new[]{"에너지 코어 X","10"}, new[]{"이계의 메아리 X","10"},
+            new[]{"이계의 메아리 X","20"}, new[]{"최초의 불꽃","가루 X 60"}, new[]{"최초의 불꽃","가루 X 20"}, new[]{"신비의 휘석(소)"} };
+        string[] p9 = { "57", "8", "57", "40", "171", "10", "3", "200" };
+        foreach (bool withEn in new[] { false, true })
+        {
+            var ocr9 = new FakeOcr { KoMisread = new() { ["200"] = "2예", ["60"] = "匍" }, HasEnglish = withEn };
+            var tr9 = new Tracker(ocr9, cfg);
+            double t9 = 0; tr9.Reset(t9);
+            Run(tr9, ocr9, Scene.Make(n9, p9), ref t9, 30);
+            var s9 = tr9.Snap();
+            string got = $"가루 x{s9.Slots[5].Card?.Qty}, 신비 {(s9.Slots[7].Card == null ? "읽기 실패" : s9.Slots[7].Card!.Price + "휘")}";
+            if (withEn) Check(s9.Slots[5].Card?.Qty == 60 && s9.Slots[7].Card?.Price == 200 && s9.Slots[7].Card?.Diff == 0, "영어 OCR 있음: " + got);
+            else Console.WriteLine("    (영어 OCR 없으면: " + got + ")");
+        }
 
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);

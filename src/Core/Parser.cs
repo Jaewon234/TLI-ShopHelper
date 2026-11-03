@@ -170,6 +170,22 @@ public static class Parser
         return KeepGridRows(SortRows(cards));
     }
 
+    /// <summary>이름 줄(한국어 OCR)과 따로 읽은 가격으로 카드 만들기.</summary>
+    public static Card? MakeCard(List<List<OcrWord>> nameLines, int price)
+    {
+        var segs = ToSegments(nameLines).OrderBy(s => s.B.Y1).ToList();
+        if (segs.Count == 0) return null;
+        string nameText = Norm(string.Concat(segs.Select(s => s.Text)));
+        if (!Hangul.IsMatch(nameText)) return null;
+        string name; int qty;
+        var m = QtyRe.Match(nameText);
+        if (!m.Success) m = QtyNoXRe.Match(nameText);
+        if (m.Success) { name = m.Groups[1].Value; qty = int.Parse(m.Groups[2].Value); }
+        else { name = nameText; qty = 1; }
+        var b = new Box(segs.Min(s => s.B.X1), segs.Min(s => s.B.Y1), segs.Max(s => s.B.X2), segs.Max(s => s.B.Y2));
+        return new Card { Raw = string.Join(" / ", segs.Select(s => s.Text)) + " / " + price, Name = name, Qty = qty, Price = price, B = b, PriceBox = b, H = segs[0].H };
+    }
+
     /// <summary>가격 줄 높이가 같은 카드끼리 한 줄로 묶어서 위→아래, 왼→오른 순서로.</summary>
     public static List<Card> SortRows(List<Card> cards)
     {

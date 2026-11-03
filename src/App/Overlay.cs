@@ -451,7 +451,6 @@ sealed class Overlay
                     break;
             }
         }
-        if (!popupOpen) DrawSummary(c, s, client, th);   // 구매 창 등이 열려 있으면 그 자리를 비움
     }
 
     string Efficiency(Card cd)
@@ -467,45 +466,4 @@ sealed class Overlay
         return $"기대 {Gain(d)}{range}";
     }
 
-    /// <summary>이익 카드: 상점 안에서는 시세 창 바로 위, 시세 창이 없으면 새로고침 버튼 위.</summary>
-    void DrawSummary(Canvas c, Snapshot s, (int X, int Y, int W, int H) client, double th)
-    {
-        double sc = Math.Clamp(th / 20.0, 0.7, 1.6);
-        var good = s.Slots.Where(x => x.Card?.Status == Verdict.Good).ToList();
-        string head = "이 화면";
-        string value = (s.PageGain > 0 ? "+" : "") + (s.PageGain / PriceInput.CrystalPrice(cfg)).ToString("0.##") + "결";
-        string side = $"구매 {good.Count}칸 · {(cfg.Resell ? "결정화 기준" : "직접 사용 기준")}";
-        string line2 = s.Pages > 0 ? $"평균 이득 {Gain(s.SumGain / s.Pages)} · 본 화면 {s.Pages}개" : "";
-        if (s.LatencyMs is double ms) line2 += (line2.Length > 0 ? " · " : "") + $"{ms:0}ms";
-        if (s.Status.Length > 0) line2 = s.Status;
-        if (update is { } nv && !installing) line2 = $"새 버전 {nv.Tag} · 트레이 메뉴 > 업데이트";
-
-        double w = 400 * sc, h = (line2.Length > 0 ? 132 : 92) * sc;
-        double x, y;
-        var er = editor?.ShopScreenRect();
-        if (er is { } e)
-        {
-            x = e.X - client.X; w = e.W;
-            y = e.Y - client.Y - 12 * sc - h;
-        }
-        else if (s.Refresh is Box rb)
-        {
-            x = rb.Cx - w / 2; y = rb.Y1 - rb.H * 2.2 - h;
-        }
-        else { x = client.W - w - 20 * sc; y = 20 * sc; }
-
-        c.FillRound(x, y, w, h, 14 * sc, Canvas.Argb(228, 12, 14, 20));
-        c.StrokeRound(x, y, w, h, 14 * sc, Canvas.Argb(28, 255, 255, 255), 1);
-        double px = x + 18 * sc;
-        c.Text(px, y + 12 * sc, head, 15 * sc, false, Muted);
-        uint vcol = s.PageGain > 0 ? Green : Muted;
-        c.Text(px, y + 32 * sc, value, 36 * sc, true, vcol);
-        var (vw, _) = c.Measure(value, 36 * sc, true);
-        c.Text(px + vw + 16 * sc, y + 50 * sc, side, 14 * sc, false, Muted);
-        if (line2.Length > 0)
-        {
-            c.Line(px, y + 92 * sc, x + w - 18 * sc, y + 92 * sc, Canvas.Argb(24, 255, 255, 255));
-            c.Text(px, y + 102 * sc, line2, 15 * sc, false, Canvas.Argb(255, 210, 214, 220));
-        }
-    }
 }

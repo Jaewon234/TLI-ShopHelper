@@ -94,7 +94,7 @@ static class App
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
         WinOcr ocr;
-        try { ocr = new WinOcr(); Log("OCR 준비됨 (최대 " + ocr.MaxDim + "px)"); }
+        try { ocr = new WinOcr(); Log("OCR 준비됨 (최대 " + ocr.MaxDim + "px, 숫자용 영어 OCR " + (ocr.HasDigits ? "있음" : "없음 → 한국어만 사용") + ")"); }
         catch (Exception e) { Error(e.Message); return 1; }
 
         // 스크린샷을 exe 위로 끌어다 놓거나 --image 파일

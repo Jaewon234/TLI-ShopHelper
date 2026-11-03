@@ -15,6 +15,7 @@ sealed class Editor
     const int ID_NAME = 1000, ID_PRICE = 2000, ID_RATE = 4001, IDOK = 1, IDCANCEL = 2;
     const int EN_CHANGE = 0x300, WM_SETFONT = 0x30, WM_CLOSE = 0x10, WM_COMMAND_ = 0x111, WM_PAINT_ = 0xF,
         WM_ERASEBKGND = 0x14, WM_CTLCOLOREDIT = 0x133, WM_NCHITTEST = 0x84, WM_LBUTTONDOWN = 0x201, WM_LBUTTONUP = 0x202;
+    const int WS_EX_NOACTIVATE = 0x8000000;
     const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_TABSTOP = 0x10000, ES_AUTOHSCROLL = 0x80,
         WS_EX_CONTROLPARENT = 0x10000, WS_EX_TOOLWINDOW_ = 0x80, WS_CLIPCHILDREN = 0x02000000;
     const int SW_HIDE = 0, SW_SHOW = 5, SW_SHOWNOACTIVATE_ = 4, SW_RESTORE = 9;
@@ -81,24 +82,99 @@ sealed class Editor
         if (rows.Count > 0) SetFocus(rows[0].PriceEdit);
     }
 
-    public void ShowInShop((int X, int Y, int W, int H) game)
+    // ---------------- 상점 안: 평소엔 작은 [시세 입력] 버튼만, 누르면 입력 창이 펼쳐짐 ----------------
+    IntPtr toggle;
+    const int ToggleW = 128, ToggleH = 40;
+    (int X, int Y, int W, int H) game;
+    bool expanded;   // 상점 안에서 입력 창이 펼쳐져 있는지
+    bool ToggleExists => toggle != IntPtr.Zero && IsWindow(toggle);
+
+    public void ShowInShop((int X, int Y, int W, int H) g)
     {
-        var extra = ExtraNames();
-        bool focused = Exists && GetForegroundWindow() == Hwnd;
-        if (Exists && ShopMode && !focused && !dirty && !extra.SetEquals(builtExtra)) Destroy();
-        if (!Exists) { Create(shop: true); placedFor = default; }
-        else if (!ShopMode) { ShopMode = true; InvalidateRect(Hwnd, IntPtr.Zero, false); }
-        if (placedFor != game)
+        game = g;
+        if (expanded && Exists && ShopMode)
         {
-            placedFor = game;
-            int x = game.X + S(16), y = game.Y + game.H - winH - S(16);
-            SetWindowPos(Hwnd, HWND_TOPMOST, x, Math.Max(game.Y, y), 0, 0, 0x1 | SWP_NOACTIVATE);
+            if (placedFor != g) PlaceExpanded();
+            ShowWindow(Hwnd, SW_SHOWNOACTIVATE_);
+            return;
         }
-        ShowWindow(Hwnd, SW_SHOWNOACTIVATE_);
+        expanded = false;
+        if (Exists && !ShopMode) return;              // 트레이에서 연 창이 떠 있으면 그대로 둠
+        if (!ToggleExists)
+        {
+            scale = GetDpiForSystem() / 96.0;
+            toggle = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW_ | WS_EX_NOACTIVATE | WS_EX_LAYERED, cls, "시세 입력 버튼",
+                WS_POPUP, 0, 0, S(ToggleW), S(ToggleH), IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
+            SetLayeredWindowAttributes(toggle, 0, 240, 2);
+            SetWindowRgn(toggle, CreateRoundRectRgn(0, 0, S(ToggleW) + 1, S(ToggleH) + 1, S(20), S(20)), true);
+            SetWindowDisplayAffinity(toggle, 0x11);
+        }
+        SetWindowPos(toggle, HWND_TOPMOST, g.X + S(16), g.Y + g.H - S(ToggleH) - S(16), 0, 0, 0x1 | SWP_NOACTIVATE);
+        ShowWindow(toggle, SW_SHOWNOACTIVATE_);
     }
 
-    public void HideInShop() { if (Exists && ShopMode) ShowWindow(Hwnd, SW_HIDE); }
-    public void CloseShop() { if (Exists && ShopMode) Destroy(); }
+    void PlaceExpanded()
+    {
+        placedFor = game;
+        int x = game.X + S(16), y = game.Y + game.H - winH - S(16);
+        SetWindowPos(Hwnd, HWND_TOPMOST, x, Math.Max(game.Y, y), 0, 0, 0x1 | SWP_NOACTIVATE);
+    }
+
+    /// <summary>[시세 입력] 버튼 → 입력 창 펼치기</summary>
+    void Expand()
+    {
+        if (ToggleExists) ShowWindow(toggle, SW_HIDE);
+        if (Exists) Destroy();
+        Create(shop: true);
+        expanded = true;
+        PlaceExpanded();
+        ShowWindow(Hwnd, SW_SHOW);
+        SetForegroundWindow(Hwnd);                      // 바로 입력할 수 있게
+        if (rows.Count > 0) SetFocus(rows[0].PriceEdit);
+    }
+
+    /// <summary>입력 창 접기 (적용 후 또는 ✕) → 다시 작은 버튼</summary>
+    void Collapse()
+    {
+        if (Exists) Destroy();
+        expanded = false;
+        if (game.W > 0) ShowInShop(game);
+    }
+
+    public void HideInShop()
+    {
+        if (Exists && ShopMode) ShowWindow(Hwnd, SW_HIDE);
+        if (ToggleExists) ShowWindow(toggle, SW_HIDE);
+    }
+
+    public void CloseShop()
+    {
+        if (Exists && ShopMode) Destroy();
+        if (ToggleExists) DestroyWindow(toggle);
+        toggle = IntPtr.Zero;
+        expanded = false;
+    }
+
+    void PaintToggle()
+    {
+        var dc = BeginPaint(toggle, out var ps);
+        int w = S(ToggleW), h = S(ToggleH);
+        var mem = CreateCompatibleDC(dc);
+        var bmp = CreateCompatibleBitmap(dc, w, h);
+        var old = SelectObject(mem, bmp);
+        using (var c = Canvas.OnDc(mem))
+        {
+            c.Clear(Bg);
+            c.StrokeRound(0.5, 0.5, w - 1, h - 1, S(10), Border, 1);
+            c.FillRect(S(14), S(11), S(4), S(18), Gold);
+            var (tw, th) = c.Measure("시세 입력", S(15), true);
+            c.Text(S(26), (h - th) / 2, "시세 입력", S(15), true, Txt);
+            c.Text(S(26) + tw + S(8), (h - th) / 2 + S(1), "▴", S(13), false, Muted);
+        }
+        BitBlt(dc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
+        SelectObject(mem, old); DeleteObject(bmp); DeleteDC(mem);
+        EndPaint(toggle, ref ps);
+    }
 
     void Destroy()
     {
@@ -168,7 +244,7 @@ sealed class Editor
         foreach (var name in extra) AddRow(name, "", null, i++, editableName: true, ref y);
         AddRow("", "", null, i++, editableName: true, ref y);
         loading = false;
-        status = shop ? "고친 뒤 [적용] 또는 Enter" : "고친 뒤 [입력완료] 또는 Enter";
+        status = shop ? "[적용] 하면 반영하고 접힘 · ✕ 는 취소" : "고친 뒤 [입력완료] 또는 Enter";
     }
 
     void AddRow(string name, string price, ItemDef? orig, int i, bool editableName, ref int y)
@@ -223,7 +299,6 @@ sealed class Editor
             c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
             var (tw, _) = c.Measure("시세 입력", S(20), true);
             c.Text(S(30) + tw + S(10), S(22), "1개당 결정 · 1/20 · 5.5휘", S(13), false, Dim);
-            if (!ShopMode)
             {
                 var (x, y, w, h) = CloseRect;
                 c.Line(x + S(6), y + S(6), x + w - S(6), y + h - S(6), Muted, 1.6);
@@ -329,7 +404,11 @@ sealed class Editor
         try { App.SavePrices(cfg); } catch (Exception e) { errors.Add("저장 실패: " + e.Message); }
         applied();
         dirty = false;
-        if (!ShopMode && errors.Count == 0) { Destroy(); return; }
+        if (errors.Count == 0)
+        {
+            if (ShopMode) Collapse(); else Destroy();   // 적용하면 접힘 (상점 안) / 닫힘 (트레이)
+            return;
+        }
         status = errors.Count == 0 ? $"적용됨 {DateTime.Now:HH:mm:ss}" : "형식 오류는 이전 값 유지: " + string.Join(", ", errors);
         InvalidateRect(Hwnd, IntPtr.Zero, false);
     }
@@ -339,6 +418,17 @@ sealed class Editor
     /// <summary>Overlay 의 창 프로시저에서 이 창 메시지를 넘겨받음. 처리했으면 결과값, 아니면 null.</summary>
     public IntPtr? Handle(IntPtr h, uint msg, IntPtr w, IntPtr l)
     {
+        if (h == toggle && toggle != IntPtr.Zero)
+        {
+            switch ((int)msg)
+            {
+                case WM_PAINT_: PaintToggle(); return IntPtr.Zero;
+                case WM_ERASEBKGND: return new IntPtr(1);
+                case WM_LBUTTONUP: Expand(); return IntPtr.Zero;
+                case 0x21: return new IntPtr(3);   // WM_MOUSEACTIVATE → MA_NOACTIVATE (게임 포커스 유지)
+            }
+            return null;
+        }
         if (h != Hwnd || Hwnd == IntPtr.Zero) return null;
         switch ((int)msg)
         {
@@ -368,7 +458,7 @@ sealed class Editor
                         return IntPtr.Zero;
                     }
                 if (In(ButtonRect, x, y)) Apply();
-                else if (!ShopMode && In(CloseRect, x, y)) Destroy();
+                else if (In(CloseRect, x, y)) { if (ShopMode) Collapse(); else Destroy(); }   // ✕ = 바꾼 값 버리고 접기/닫기
                 return IntPtr.Zero;
             }
             case WM_COMMAND_:
@@ -382,10 +472,10 @@ sealed class Editor
                     return IntPtr.Zero;
                 }
                 if (id == IDOK) { Apply(); return IntPtr.Zero; }
-                if (id == IDCANCEL && !ShopMode) { Destroy(); return IntPtr.Zero; }
+                if (id == IDCANCEL) { if (ShopMode) Collapse(); else Destroy(); return IntPtr.Zero; }   // Esc
                 break;
             }
-            case WM_CLOSE: Destroy(); return IntPtr.Zero;
+            case WM_CLOSE: if (ShopMode) Collapse(); else Destroy(); return IntPtr.Zero;
         }
         return null;
     }

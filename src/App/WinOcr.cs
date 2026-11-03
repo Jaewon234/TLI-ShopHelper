@@ -11,7 +11,9 @@ namespace ShopHelper;
 sealed class WinOcr : IOcr
 {
     readonly OcrEngine engine;
+    readonly OcrEngine? engineEn;   // 숫자용 (한글을 모르니 숫자를 숫자로 읽음)
     public int MaxDim { get; }
+    public bool HasDigits => engineEn != null;
 
     public WinOcr()
     {
@@ -20,9 +22,15 @@ sealed class WinOcr : IOcr
                      "Windows 한국어 OCR이 없습니다.\n\n관리자 PowerShell에서 아래 명령을 실행한 뒤 다시 켜 주세요:\n\n" +
                      "Add-WindowsCapability -Online -Name \"Language.OCR~~~ko-KR~0.0.1.0\"");
         MaxDim = (int)OcrEngine.MaxImageDimension;
+        try { engineEn = OcrEngine.TryCreateFromLanguage(new Language("en-US")) ?? OcrEngine.TryCreateFromLanguage(new Language("en")); } catch { }
     }
 
-    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
+    public List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale) =>
+        engineEn == null ? null : Run(engineEn, img);
+
+    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale) => Run(engine, img);
+
+    static List<List<OcrWord>> Run(OcrEngine engine, Frame img)
     {
         var buf = CryptographicBuffer.CreateFromByteArray(img.Px);
         using var bmp = SoftwareBitmap.CreateCopyFromBuffer(buf, BitmapPixelFormat.Bgra8, img.W, img.H, BitmapAlphaMode.Ignore);
