@@ -134,6 +134,17 @@ static class T
         Check(cards[0].Value == 49 && cards[4].Value == 97 && cards[5].Value == 500, "되팔기: 메아리10=49, 메아리20=97, 결정 세금없음");
         cfg.Mode = "use";
 
+        Console.WriteLine("[1b] 개수: OCR 이 X 를 놓쳐도");
+        foreach (var (lines2, want) in new (string[], int)[] {
+            (new[] { "최초의 불꽃", "결정 10", "390" }, 10), (new[] { "최초의 불꽃", "결정10", "390" }, 10),
+            (new[] { "이계의 메아리", "20", "107" }, 20), (new[] { "최초의 불꽃", "결정", "56" }, 1), (new[] { "신비의 휘석(소)", "200" }, 1) })
+        {
+            var ws = new List<List<OcrWord>>(); double yy = 200;
+            foreach (var ln in lines2) { double xx = 400; var row = new List<OcrWord>(); foreach (var w in ln.Split(' ')) { row.Add(new OcrWord(w, xx, yy, w.Length * 12, 14)); xx += w.Length * 12 + 4; } ws.Add(row); yy += 20; }
+            var (qc, _) = Parser.Analyze(ws, cfg);
+            Check(qc.Count == 1 && qc[0].Qty == want, $"{string.Join(" / ", lines2)} → {(qc.Count == 1 ? qc[0].Qty : -1)}개");
+        }
+
         Console.WriteLine("[2] 추적기: 첫 스캔");
         ocr = new FakeOcr();
         var tr = new Tracker(ocr, cfg) { Log = m => Console.WriteLine("    log: " + m) };

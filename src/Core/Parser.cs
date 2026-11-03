@@ -90,6 +90,8 @@ public static class Parser
     static readonly Regex Hangul = new(@"[가-힣]", RegexOptions.Compiled);
     static readonly Regex TrailingX = new(@"[XxХх×]$", RegexOptions.Compiled);
     static readonly Regex QtyRe = new(@"^(.*?)[XxХх×]\s*(\d+)$", RegexOptions.Compiled);
+    // OCR 이 'X' 를 놓친 경우: 상품 이름은 숫자로 끝나지 않으므로 끝의 숫자를 개수로 봄 (예: 결정10, 결정 10)
+    static readonly Regex QtyNoXRe = new(@"^(.*[가-힣)])\s*(\d{1,4})$", RegexOptions.Compiled);
 
     public static bool IsPrice(string t)
     {
@@ -118,6 +120,7 @@ public static class Parser
             if (TrailingX.IsMatch(nameText)) continue; // 수량 뒤 가격을 못 읽음
             string name; int qty;
             var m = QtyRe.Match(nameText);
+            if (!m.Success) m = QtyNoXRe.Match(nameText);
             if (m.Success) { name = m.Groups[1].Value; qty = int.Parse(m.Groups[2].Value); }
             else { name = nameText; qty = 1; }
             if (qty <= 0) continue;
