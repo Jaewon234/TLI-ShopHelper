@@ -140,6 +140,14 @@ static class T
         Check(cards[0].Value == 49 && cards[4].Value == 97 && cards[5].Value == 500, "되팔기: 메아리10=49, 메아리20=97, 결정 세금없음");
         cfg.Mode = "use";
 
+        Console.WriteLine("[1a] 가격: OCR 이 0 을 O 로 읽어도 (200 → 2 로 읽던 문제)");
+        foreach (var (txt, want) in new (string, int)[] { ("2OO", 200), ("十5OO", 500), ("◆1O7", 107), ("◆66", 66), ("十48", 48), ("l66", 66), ("534", 534), ("1,025", 1025), ("200", 200) })
+            Check(Parser.IsPrice(txt) && Parser.PriceValue(txt) == want, $"{txt} → {(Parser.IsPrice(txt) ? Parser.PriceValue(txt) : -1)}");
+        foreach (var txt in new[] { "가루X60", "직)X20", "결정", "이계의메아리X", "2OOx", "새로고침" })
+            Check(!Parser.IsPrice(txt), $"{txt} 는 가격 아님");
+        var gs = new Config(); var gcard = new Card { Name = "신비의휘석(소)", Qty = 1, Price = Parser.PriceValue("2OO") }; Parser.Evaluate(gcard, gs);
+        Check(gcard.Diff == 0, $"신비의 휘석(소) 2OO → 200 → 기대 0 (전에는 +198휘 = +3.56결)");
+
         Console.WriteLine("[1b] 개수: OCR 이 X 를 놓쳐도");
         foreach (var (lines2, want) in new (string[], int)[] {
             (new[] { "최초의 불꽃", "결정 10", "390" }, 10), (new[] { "최초의 불꽃", "결정10", "390" }, 10),

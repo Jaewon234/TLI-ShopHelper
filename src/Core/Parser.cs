@@ -93,12 +93,37 @@ public static class Parser
     // OCR 이 'X' 를 놓친 경우: 상품 이름은 숫자로 끝나지 않으므로 끝의 숫자를 개수로 봄 (예: 결정10, 결정 10)
     static readonly Regex QtyNoXRe = new(@"^(.*[가-힣)])\s*(\d{1,4})$", RegexOptions.Compiled);
 
+    // 가격: 앞쪽 보석 아이콘 자리에만 숫자 아닌 글자 0~2개, 나머지는 숫자(쉼표 허용)
+    static readonly Regex PriceRe = new(@"^[^0-9]{0,2}([0-9][0-9,]{0,7})$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// OCR 이 숫자를 비슷한 글자로 읽은 것을 되돌림: 2OO → 200, 1O7 → 107, l65 → 165.
+    /// 숫자가 하나라도 있는 글자에만 적용 (상품 이름은 그대로).
+    /// </summary>
+    public static string NormalizePrice(string t)
+    {
+        t = t.Replace(" ", "");
+        if (!t.Any(char.IsAsciiDigit)) return t;
+        var sb = new System.Text.StringBuilder(t.Length);
+        // 맨 앞 1~2글자는 보석 아이콘일 수 있으니, 숫자가 처음 나온 뒤부터만 바꿈
+        int firstDigit = t.IndexOf(t.First(char.IsAsciiDigit));
+        for (int i = 0; i < t.Length; i++)
+        {
+            char ch = t[i];
+            if (i >= firstDigit)   // 앞쪽은 보석 아이콘일 수 있으므로 바꾸지 않음 (l66 → 166 이 되지 않게)
+                ch = ch switch { 'O' or 'o' or '〇' or 'Ｏ' or 'D' => '0', 'l' or 'I' or '|' or '!' or 'ㅣ' => '1', 'B' => '8', 'S' => '5', _ => ch };
+            sb.Append(ch);
+        }
+        return sb.ToString();
+    }
+
     public static bool IsPrice(string t)
     {
-        string digits = NonDigit.Replace(t, "");
-        string other = NonPriceChars.Replace(t, "");
-        return digits.Length > 0 && other.Length <= 2 && digits.Length <= 6;
+        var m = PriceRe.Match(NormalizePrice(t));
+        return m.Success && m.Groups[1].Value.Replace(",", "").Length <= 6;
     }
+
+    public static int PriceValue(string t) => int.Parse(PriceRe.Match(NormalizePrice(t)).Groups[1].Value.Replace(",", ""));
 
     public static string Norm(string t) => t.Replace(" ", "").Replace("（", "(").Replace("）", ")");
 
@@ -130,7 +155,7 @@ public static class Parser
                 Raw = string.Join(" / ", used.Select(s => s.Text)),
                 Name = name,
                 Qty = qty,
-                Price = sold ? 0 : int.Parse(NonDigit.Replace(c[idx].Text, "")),
+                Price = sold ? 0 : PriceValue(c[idx].Text),
                 Sold = sold,
                 B = new Box(used.Min(s => s.B.X1), used.Min(s => s.B.Y1), used.Max(s => s.B.X2), used.Max(s => s.B.Y2)),
                 PriceBox = c[idx].B,
