@@ -34,7 +34,9 @@ dotnet publish src/App/ShopHelper.csproj -c Release -o out
 ```
 Linux에서도 Windows용 exe를 빌드할 수 있습니다 (`EnableWindowsTargeting`, WinForms/WPF 미사용).
 
-## 설정 (`config.json`, exe 옆에 자동 생성)
+## 설정 (`%AppData%\ShopHelper\config.json`)
+업데이트할 때 zip 을 덮어써도 시세가 유지되도록 프로그램 폴더 밖에 저장합니다. 배포 zip 에는 config.json 을 넣지 않습니다.
+
 - `mode`: `resell`(기본, 결정화: 수수료 12.5% 떼고 올림한 실수령 기준) / `use`(직접 사용, 시세 기준)
 - `items`: 1개당 결정 시세 (`crystal_rate` = 결정 1개가 몇 휘석, 기본 50). 모르면 `null`. 도박 항목은 `kind: gamble`, `gamble_min`/`gamble_max`(휘석)
 - 시세 창: 상점 안 왼쪽 아래 자동 표시 / 트레이 메뉴·더블클릭·Ctrl+Shift+P. 메모장으로 고쳐도 저장 즉시 반영

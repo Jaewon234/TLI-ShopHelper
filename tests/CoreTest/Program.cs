@@ -243,6 +243,15 @@ static class T
         Check(loaded.Items.Single(i => i.Name == "에너지 코어").Price == 0.04 && loaded.PriceUnit == "crystal", "예전 파일 읽으면 자동 변환 (코어 2휘 → 0.04결)");
         Check(File.ReadAllText(tmp).Contains("price_unit"), "변환 후 파일에 저장");
 
+        Console.WriteLine("[10] 업데이트해도 입력한 시세 유지");
+        var mine = new Config();
+        mine.Items.Single(i => i.Name == "이계의 메아리").Price = 0.13;
+        mine.Items.RemoveAll(i => i.Name == "절대자 엠버");   // 예전 버전에 없던 항목이라고 가정
+        mine.Save(tmp);
+        var re = Config.Load(tmp);
+        Check(re.Items.Single(i => i.Name == "이계의 메아리").Price == 0.13, "메아리 0.13 그대로");
+        Check(re.Items.Single(i => i.Name == "절대자 엠버").Price == 20.5, "새 기본 항목만 추가");
+
         Console.WriteLine(fails == 0 ? "\n모든 테스트 통과" : $"\n실패 {fails}개");
         return fails;
     }

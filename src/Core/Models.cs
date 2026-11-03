@@ -162,6 +162,9 @@ public sealed class Config
             else if (!g.IsGamble) { g.Kind = d.Kind; g.Taxed = false; g.GambleMin ??= d.GambleMin; g.GambleMax ??= d.GambleMax; g.Price = null; changed = true; }
         }
         if (!Items.Any(i => i.IsCrystal)) { Items.Insert(0, new ItemDef { Name = "최초의 불꽃 결정", Price = 1, Taxed = false }); changed = true; }
+        // 새 버전에서 기본 항목이 늘어나면 없는 것만 추가 (입력해 둔 시세는 그대로)
+        foreach (var d in DefaultItems())
+            if (!Items.Any(i => i.Name.Replace(" ", "") == d.Name.Replace(" ", ""))) { Items.Add(d); changed = true; }
         return changed;
     }
 

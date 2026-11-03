@@ -7,7 +7,28 @@ namespace ShopHelper;
 static class App
 {
     public static readonly string Dir = AppContext.BaseDirectory;
-    public static readonly string ConfigPath = Path.Combine(Dir, "config.json");
+    /// <summary>
+    /// 시세 설정은 프로그램 폴더 밖(%AppData%\ShopHelper)에 저장.
+    /// 새 버전 zip 을 같은 폴더에 풀어도 입력한 시세가 덮어써지지 않음.
+    /// </summary>
+    public static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopHelper");
+    public static readonly string ConfigPath = Path.Combine(DataDir, "config.json");
+    static readonly string OldConfigPath = Path.Combine(Dir, "config.json");
+
+    /// <summary>예전 버전처럼 exe 옆에 config.json 이 있고 새 위치에는 없으면, 한 번만 옮겨옴.</summary>
+    static void MoveOldConfig()
+    {
+        try
+        {
+            Directory.CreateDirectory(DataDir);
+            if (!File.Exists(ConfigPath) && File.Exists(OldConfigPath))
+            {
+                File.Copy(OldConfigPath, ConfigPath);
+                Log("예전 config.json 을 " + ConfigPath + " 로 옮김");
+            }
+        }
+        catch (Exception e) { Log("설정 폴더 오류: " + e.Message); }
+    }
     public static readonly string LogPath = Path.Combine(Dir, "helper.log");
     static readonly object logLock = new();
 
@@ -35,7 +56,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.5.0";
+    public const string Version = "1.5.1";
 
     [STAThread]
     static int Main(string[] args)
@@ -62,6 +83,8 @@ static class App
         Log($"시작 v{Version} · {Environment.OSVersion} · {Environment.ProcessPath}");
         SetProcessDpiAwarenessContext(new IntPtr(-4)); // Per-monitor v2
         Config cfg;
+        MoveOldConfig();
+        Log("설정 파일: " + ConfigPath);
         try { cfg = Config.Load(ConfigPath); }
         catch (Exception e) { Error("config.json 을 읽을 수 없습니다:\n" + e.Message); return 1; }
 
