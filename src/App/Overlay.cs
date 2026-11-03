@@ -148,11 +148,17 @@ sealed class Overlay
     NOTIFYICONDATA TrayData() => new()
     {
         cbSize = Marshal.SizeOf<NOTIFYICONDATA>(), hWnd = msgWnd, uID = 1,
-        uFlags = 0x1 | 0x2 | 0x4, uCallbackMessage = MSG_TRAY, hIcon = icon,
+        uFlags = 0x1 | 0x2 | 0x4 | 0x80 /*NIF_SHOWTIP: 버전 4 에서 툴팁 표시*/, uCallbackMessage = MSG_TRAY, hIcon = icon,
         szTip = "신들의 강복 도우미", szInfo = "", szInfoTitle = "",
     };
 
-    void AddTray() { var d = TrayData(); Shell_NotifyIconW(0, ref d); }
+    void AddTray()
+    {
+        var d = TrayData();
+        Shell_NotifyIconW(0, ref d);              // NIM_ADD
+        d.uVersion = 4;                            // NOTIFYICON_VERSION_4: 오른쪽 클릭을 WM_CONTEXTMENU 한 번으로 받음
+        Shell_NotifyIconW(4, ref d);              // NIM_SETVERSION
+    }
     void RemoveTray() { var d = TrayData(); Shell_NotifyIconW(2, ref d); }
 
     void ShowBalloon()
@@ -182,7 +188,9 @@ sealed class Overlay
         AppendMenuW(menu, 0, (UIntPtr)9, "종료");
         GetCursorPos(out var p);
         SetForegroundWindow(msgWnd);
-        int cmd = TrackPopupMenu(menu, 0x100 | 0x2, p.X, p.Y, 0, msgWnd, IntPtr.Zero);
+        // TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NOANIMATION: 애니메이션 없이 바로 뜸
+        int cmd = TrackPopupMenu(menu, 0x100 | 0x2 | 0x4000, p.X, p.Y, 0, msgWnd, IntPtr.Zero);
+        PostMessageW(msgWnd, 0 /*WM_NULL*/, IntPtr.Zero, IntPtr.Zero);   // 메뉴 밖을 눌렀을 때 바로 닫히고 클릭이 씹히지 않게 (Windows 권장)
         DestroyMenu(menu);
         switch (cmd)
         {
@@ -309,7 +317,7 @@ sealed class Overlay
                     int ev = (int)(l.ToInt64() & 0xFFFF);
                     if (ev == 0x405 /*NIN_BALLOONUSERCLICK*/ && update != null && !installing) StartInstall();
                     else if (ev == WM_LBUTTONDBLCLK) OpenEditor();
-                    else if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU) TrayMenu();
+                    else if (ev == WM_CONTEXTMENU) TrayMenu();   // 버전 4: 오른쪽 클릭 한 번 = WM_CONTEXTMENU 한 번
                     return IntPtr.Zero;
                 case MSG_PANEL:
                     (PanelState st, (int X, int Y, int W, int H) pr, int ver) want;
