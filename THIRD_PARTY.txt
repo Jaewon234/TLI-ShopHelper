@@ -1,0 +1,10 @@
+이 프로그램에 함께 들어 있는 다른 사람의 소프트웨어
+
+- PaddleOCR PP-OCRv4 모델 (글자 위치 찾기, 한국어·영어 글자 읽기)
+  https://github.com/PaddlePaddle/PaddleOCR · Apache License 2.0
+  Sdcb.PaddleOCR.Models.LocalV4 / Shared (Apache-2.0) 에 들어 있는 모델을 ONNX 형식으로 변환해 사용
+
+- ONNX Runtime
+  https://github.com/microsoft/onnxruntime · MIT License
+
+- 자동 업데이트 방식과 일부 구조는 TartarusSolver(MIT, Artem Gurevich)를 참고

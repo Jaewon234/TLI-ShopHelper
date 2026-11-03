@@ -105,6 +105,27 @@ public sealed class Tracker
         foreach (var s in new[] { slots[rescanIdx++] })
         {
             if (rescanIdx >= slots.Count) rescanIdx = -1;
+            // 이미 읽은 칸은 숫자(가격·개수)만 다시 확인 (이름은 거의 안 틀리고, 숫자만 읽는 게 훨씬 빠름)
+            if (s.Card is { Sold: false } cur)
+            {
+                var en = Read(Src(f), s.R, cfg.SlotOcrScale, digits: true);
+                if (en != null)
+                {
+                    var (p, q) = DigitsFrom(en, s);
+                    var fixedCard = cur.Clone();
+                    ApplyDigits(fixedCard, p, q);
+                    if (fixedCard.Price == cur.Price && fixedCard.Qty == cur.Qty) continue;
+                    Log?.Invoke($"다시 읽기로 고침: {Describe1(cur)} → {Describe1(fixedCard)}");
+                    s.Card = fixedCard;
+                    if (s.SettledFp != null && s.SettledPfp != null)
+                    {
+                        cache.RemoveAll(e => Fingerprint.DiffCells(e.Pfp, s.SettledPfp) == 0 && Fingerprint.DiffCells(e.Fp, s.SettledFp) <= Fingerprint.Cells(s.SettledFp) / 100);
+                        cache.Add(new CacheEntry { Fp = s.SettledFp, Pfp = s.SettledPfp, Card = fixedCard.Clone() });
+                    }
+                    changed = true;
+                    continue;
+                }
+            }
             var card = OcrSlot(f, s);
             if (card == null) continue;                 // 못 읽으면 지금 결과 유지
             var old = s.Card;

@@ -95,6 +95,8 @@ public sealed class Config
     [JsonPropertyName("slot_ocr_scale")] public double SlotOcrScale { get; set; } = 2.5;
     /// <summary>자동 읽기: 몇 초마다 모든 칸을 다시 읽는지 (0 = 끔). 기억해 둔 결과가 틀렸어도 바로잡음</summary>
     [JsonPropertyName("reread_sec")] public double RereadSec { get; set; } = 1;
+    /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
+    [JsonPropertyName("ocr_engine")] public string OcrEngine { get; set; } = "auto";
     [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
     [JsonPropertyName("update_repo")] public string UpdateRepo { get; set; } = "Jaewon234/TLI-ShopHelper";
     [JsonPropertyName("window_class")] public string WindowClass { get; set; } = "UnrealWindow";

@@ -137,9 +137,33 @@ static class T
         for (int i = 0; i < frames; i++) { t.Update(f, now); now += 30; }
     }
 
+    /// <summary>내장 OCR 로 실제 스크린샷(raw BGRA)을 읽어 칸 결과 출력.</summary>
+    static int PaddleRun(string[] files)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        using var po = new PaddleOcr();
+        Console.WriteLine($"모델 로드 {sw.ElapsedMilliseconds}ms");
+        foreach (var file in files)
+        {
+            var b = File.ReadAllBytes(file);
+            int w = BitConverter.ToInt32(b, 0), h = BitConverter.ToInt32(b, 4);
+            var f = new Frame(b[8..], w, h);
+            var cfg = new Config();
+            var tr = new Tracker(po, cfg) { Log = m => Console.WriteLine("    log: " + m) };
+            tr.Reset(0, 0);
+            sw.Restart();
+            double t = 0;
+            for (int i = 0; i < 40; i++, t += 50) { tr.Update(f, t); if (i > 2 && tr.Snap().Slots.All(x => !x.Pending)) break; }
+            Console.WriteLine($"== {Path.GetFileName(file)} {w}x{h} · 처리 {sw.ElapsedMilliseconds}ms");
+            Console.Write(Parser.Describe(tr.Snap().Slots.Select(x => x.Card), cfg));
+        }
+        return 0;
+    }
+
     static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--write-config") { new Config().Save(args[1]); return 0; }
+        if (args.Length >= 2 && args[0] == "--paddle") return PaddleRun(args.Skip(1).ToArray());
         var cfg = new Config { CrystalRate = 50, RereadSec = 0 };   // 테스트는 결정 1개 = 50휘석, 자동 읽기 끔 (기억 동작 확인용)
         Console.WriteLine("[1] 파서: 스크린샷 배치");
         var ocr = new FakeOcr { Scene = Scene.Make(NamesA, PricesA) };

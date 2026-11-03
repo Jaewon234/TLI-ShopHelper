@@ -33,6 +33,7 @@
 - 업데이트 확인 / 자동으로 업데이트 확인 켜기·끄기
 (로그: exe 와 같은 폴더의 helper.log, 시세 파일: %AppData%\ShopHelper\prices.json)
 
-[한국어 OCR이 없다고 나올 때]
-관리자 PowerShell에서:
-Add-WindowsCapability -Online -Name "Language.OCR~~~ko-KR~0.0.1.0"
+[글자 인식(OCR)]
+따로 설치할 것은 없습니다. Windows 에 한국어/영어 OCR 이 있으면 그걸 쓰고(빠름),
+없으면 프로그램에 들어 있는 OCR 을 자동으로 씁니다. 어떤 걸 쓰는지는 helper.log 의 'OCR:' 줄에 나옵니다.
+(내장 OCR 은 상점을 처음 열 때 몇 초 걸릴 수 있습니다)

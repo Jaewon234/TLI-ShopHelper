@@ -93,9 +93,14 @@ static class App
         catch (Exception e) { Error("시세/설정 파일을 읽을 수 없습니다:\n" + e.Message + "\n\n" + DataDir); return 1; }
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
-        WinOcr ocr;
-        try { ocr = new WinOcr(); Log("OCR 준비됨 (최대 " + ocr.MaxDim + "px, 숫자용 영어 OCR " + (ocr.HasDigits ? "있음" : "없음 → 한국어만 사용") + ")"); }
-        catch (Exception e) { Error(e.Message); return 1; }
+        IOcr ocr;
+        try
+        {
+            var stack = new OcrStack(cfg);
+            ocr = stack;
+            Log("OCR: " + stack.Describe);
+        }
+        catch (Exception e) { Log("OCR 오류: " + e); Error("OCR 을 준비하지 못했습니다:\n" + e.Message); return 1; }
 
         // 스크린샷을 exe 위로 끌어다 놓거나 --image 파일
         string? image = args.Length >= 2 && args[0] == "--image" ? args[1]
