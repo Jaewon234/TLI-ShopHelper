@@ -195,6 +195,10 @@ sealed class Engine
         }
     }
 
+    static readonly uint MyPid = (uint)Environment.ProcessId;
+    /// <summary>앞에 있는 창이 이 프로그램 자신의 창인지 (트레이 메뉴, 시세 창, 버튼 …)</summary>
+    static bool IsOurWindow(IntPtr w) { GetWindowThreadProcessId(w, out uint pid); return pid == MyPid; }
+
     void Run()
     {
         // 엔진에서 오류가 나도 프로그램이 꺼지지 않게: 로그에 남기고 다시 시작
@@ -257,9 +261,9 @@ sealed class Engine
             }
             var rect = GameWindow.ClientRect(hwnd);
             var fg = GetForegroundWindow();
-            if (rect != null && fg != hwnd && fg != IntPtr.Zero && fg == overlay.EditorHwnd)
+            if (rect != null && fg != hwnd && fg != IntPtr.Zero && IsOurWindow(fg))
             {
-                // 시세 입력 창을 쓰는 동안: 화면 추적은 멈추고 결과만 계속 보여줌
+                // 시세 창·트레이 메뉴 등 이 프로그램 창이 앞에 있을 때: 게임이 뒤로 간 게 아니므로 결과를 계속 보여줌
                 overlay.Panel(PopupOpen ? PanelState.Hidden : PanelState.Visible, rect.Value, unknownVer);
                 if (!shown) { overlay.Show(rect.Value, tracker.Snap()); shown = true; }
                 wake.WaitOne(60);

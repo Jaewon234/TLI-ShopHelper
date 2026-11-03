@@ -323,10 +323,19 @@ sealed class Overlay
             var f = g.Grab(r.X, r.Y, r.W, r.H);
             var outF = new Frame((byte[])f.Px.Clone(), f.W, f.H);
             // 1) 오버레이 (미리 곱한 알파로 겹치기)
-            if (vis && dibBits != IntPtr.Zero && dibW == r.W && dibH == r.H)
+            Snapshot? sn; lock (gate) sn = snap;
+            if (vis && sn != null && r.W > 0)
             {
+                // 지금 보이는 결과를 다시 그려서 합침 (상점을 닫은 뒤의 예전 결과는 그리지 않음)
                 var ov = new byte[r.W * r.H * 4];
-                Marshal.Copy(dibBits, ov, 0, ov.Length);
+                var hbits = Marshal.AllocHGlobal(ov.Length);
+                try
+                {
+                    unsafe { new Span<byte>((void*)hbits, ov.Length).Clear(); }
+                    using (var c = Canvas.OnBits(hbits, r.W, r.H)) { c.Clear(0); Draw(c, sn, r); }
+                    Marshal.Copy(hbits, ov, 0, ov.Length);
+                }
+                finally { Marshal.FreeHGlobal(hbits); }
                 var px = outF.Px;
                 for (int i = 0; i < ov.Length; i += 4)
                 {

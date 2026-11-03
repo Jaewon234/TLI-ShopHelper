@@ -11,6 +11,7 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <InvariantGlobalization>false</InvariantGlobalization>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>ShopHelper</AssemblyName>
     <RootNamespace>ShopHelper</RootNamespace>
