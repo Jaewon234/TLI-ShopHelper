@@ -351,14 +351,10 @@ sealed class Overlay
             }
             // 2) 시세 창 / [시세 입력] 버튼
             if (editor != null)
-                foreach (var wnd in editor.VisibleWindows())
+                foreach (var (wf, wnd) in editor.RenderVisible())
                 {
                     GetWindowRect(wnd, out var wr);
-                    int ww = wr.Right - wr.Left, wh = wr.Bottom - wr.Top;
-                    if (ww <= 0 || wh <= 0) continue;
-                    using var wg = new Grabber();
-                    var wf = wg.GrabWindowAny(wnd, ww, wh);
-                    if (wf == null) continue;
+                    int ww = wf.W, wh = wf.H;
                     int ox = wr.Left - r.X, oy = wr.Top - r.Y;
                     var shape = CreateRectRgn(0, 0, 0, 0);
                     bool hasShape = GetWindowRgn(wnd, shape) != 0;   // 둥근 모서리 모양 (없으면 사각형 전체)

@@ -169,18 +169,44 @@ sealed class Editor
         var mem = CreateCompatibleDC(dc);
         var bmp = CreateCompatibleBitmap(dc, w, h);
         var old = SelectObject(mem, bmp);
-        using (var c = Canvas.OnDc(mem))
-        {
-            c.Clear(Bg);
-            c.StrokeRound(0.5, 0.5, w - 1, h - 1, S(10), Border, 1);
-            c.FillRect(S(14), S(11), S(4), S(18), Gold);
-            var (tw, th) = c.Measure("시세 입력", S(15), true);
-            c.Text(S(26), (h - th) / 2, "시세 입력", S(15), true, Txt);
-            c.Text(S(26) + tw + S(8), (h - th) / 2 + S(1), "▴", S(13), false, Muted);
-        }
+        using (var c = Canvas.OnDc(mem)) DrawToggle(c, w, h);
         BitBlt(dc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
         SelectObject(mem, old); DeleteObject(bmp); DeleteDC(mem);
         EndPaint(toggle, ref ps);
+    }
+
+    void DrawToggle(Canvas c, int w, int h)
+    {
+        c.Clear(Bg);
+        c.StrokeRound(0.5, 0.5, w - 1, h - 1, S(10), Border, 1);
+        c.FillRect(S(14), S(11), S(4), S(18), Gold);
+        var (tw, th) = c.Measure("시세 입력", S(15), true);
+        c.Text(S(26), (h - th) / 2, "시세 입력", S(15), true, Txt);
+        c.Text(S(26) + tw + S(8), (h - th) / 2 + S(1), "▴", S(13), false, Muted);
+    }
+
+    /// <summary>
+    /// 화면 그대로 저장용: 지금 보이는 시세 창/버튼을 같은 코드로 그림으로 다시 그림.
+    /// (창은 OCR 에 안 섞이게 캡처에서 빠져 있어서, 창 내용을 Windows 에서 받아오면 까맣게 나옴)
+    /// </summary>
+    public List<(Frame img, IntPtr hwnd)> RenderVisible()
+    {
+        var list = new List<(Frame, IntPtr)>();
+        void One(IntPtr wnd, int w, int h, Action<Canvas> draw)
+        {
+            var bits = System.Runtime.InteropServices.Marshal.AllocHGlobal(w * h * 4);
+            try
+            {
+                using (var c = Canvas.OnBits(bits, w, h)) draw(c);
+                var f = new Frame(w, h);
+                System.Runtime.InteropServices.Marshal.Copy(bits, f.Px, 0, f.Px.Length);
+                list.Add((f, wnd));
+            }
+            finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(bits); }
+        }
+        if (ToggleExists && IsWindowVisible(toggle)) One(toggle, S(ToggleW), S(ToggleH), c => DrawToggle(c, S(ToggleW), S(ToggleH)));
+        if (Exists && IsWindowVisible(Hwnd)) One(Hwnd, winW, winH, c => DrawEditor(c, withTexts: true));
+        return list;
     }
 
     void Destroy()
@@ -310,58 +336,71 @@ sealed class Editor
         var mem = CreateCompatibleDC(dc);
         var bmp = CreateCompatibleBitmap(dc, winW, winH);
         var old = SelectObject(mem, bmp);
-        using (var c = Canvas.OnDc(mem))
-        {
-            c.Clear(Bg);
-            c.StrokeRound(0.5, 0.5, mainW - 1, winH - 1, S(14), Border, 1);
-            DrawSpeed(c);
-            // 머리
-            c.FillRect(S(18), S(20), S(4), S(20), Gold);
-            c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
-            var (tw, _) = c.Measure("시세 입력", S(20), true);
-            c.Text(S(30) + tw + S(10), S(22), "1개당 결정 · 1/20 · 5.5휘", S(13), false, Dim);
-            {
-                var (x, y, w, h) = CloseRect;
-                c.Line(x + S(6), y + S(6), x + w - S(6), y + h - S(6), Muted, 1.6);
-                c.Line(x + w - S(6), y + S(6), x + S(6), y + h - S(6), Muted, 1.6);
-            }
-            // 결정 환율
-            int ry = S(Header + 6);
-            c.Text(S(20), ry + S(6), "신력의 휘석 1개 =", S(15), false, Muted);
-            FieldBg(c, S(FieldX), ry, S(FieldW), Text(rateEdit), true);
-            c.Text(S(FieldX + FieldW + 12), ry + S(7), "결정", S(13), false, Dim);
-            c.Line(S(18), S(Header + 44), mainW - S(18), S(Header + 44), Line_);
-            // 항목
-            double rate = RateInput();
-            foreach (var r in rows)
-            {
-                int y = S(r.Y);
-                if (r.NameEdit != IntPtr.Zero)
-                {
-                    c.FillRound(S(18), y, S(166), S(FieldH), S(8), Field);
-                    if (Text(r.NameEdit).Length == 0) c.Text(S(28), y + S(6), "새 항목 이름", S(14), false, Dim);
-                }
-                else c.Text(S(20), y + S(6), r.Label, S(15), false, Txt);
-                string pt = Text(r.PriceEdit);
-                FieldBg(c, S(FieldX), y, S(FieldW), pt, false);
-                string res = "";
-                uint rc = Dim;
-                if (!PriceInput.TryParse(pt, rate, out var v)) { res = "형식 오류"; rc = Warn; }
-                else if (v is double d) res = "= " + Parser.FmtPrice(d * rate) + "휘";
-                c.Text(S(FieldX + FieldW + 12), y + S(7), res, S(13), false, rc);
-            }
-            // 아래
-            c.Line(S(18), footerY, mainW - S(18), footerY, Line_);
-            c.Text(S(20), footerY + S(22), status, S(13), false, dirty ? Canvas.Argb(255, 220, 190, 120) : Dim);
-            var (bx, by, bw, bh) = ButtonRect;
-            c.FillRound(bx, by, bw, bh, S(10), Gold);
-            string label = ShopMode ? "적용" : "입력완료";
-            var (lw, lh) = c.Measure(label, S(16), true);
-            c.Text(bx + (bw - lw) / 2, by + (bh - lh) / 2, label, S(16), true, GoldText);
-        }
+        using (var c = Canvas.OnDc(mem)) DrawEditor(c, withTexts: false);
         BitBlt(dc, 0, 0, winW, winH, mem, 0, 0, SRCCOPY);
         SelectObject(mem, old); DeleteObject(bmp); DeleteDC(mem);
         EndPaint(Hwnd, ref ps);
+    }
+
+    /// <summary>시세 창 그리기. withTexts = 입력칸 글자도 직접 그림 (화면 그대로 저장용, 평소엔 입력칸이 스스로 그림)</summary>
+    void DrawEditor(Canvas c, bool withTexts)
+    {
+        c.Clear(Bg);
+        c.StrokeRound(0.5, 0.5, mainW - 1, winH - 1, S(14), Border, 1);
+        DrawSpeed(c);
+        // 머리
+        c.FillRect(S(18), S(20), S(4), S(20), Gold);
+        c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
+        var (tw, _) = c.Measure("시세 입력", S(20), true);
+        c.Text(S(30) + tw + S(10), S(22), "1개당 결정 · 1/20 · 5.5휘", S(13), false, Dim);
+        {
+            var (x, y, w, h) = CloseRect;
+            c.Line(x + S(6), y + S(6), x + w - S(6), y + h - S(6), Muted, 1.6);
+            c.Line(x + w - S(6), y + S(6), x + S(6), y + h - S(6), Muted, 1.6);
+        }
+        // 결정 환율
+        int ry = S(Header + 6);
+        c.Text(S(20), ry + S(6), "신력의 휘석 1개 =", S(15), false, Muted);
+        FieldBg(c, S(FieldX), ry, S(FieldW), Text(rateEdit), true);
+        c.Text(S(FieldX + FieldW + 12), ry + S(7), "결정", S(13), false, Dim);
+        c.Line(S(18), S(Header + 44), mainW - S(18), S(Header + 44), Line_);
+        // 항목
+        double rate = RateInput();
+        foreach (var r in rows)
+        {
+            int y = S(r.Y);
+            if (r.NameEdit != IntPtr.Zero)
+            {
+                c.FillRound(S(18), y, S(166), S(FieldH), S(8), Field);
+                if (Text(r.NameEdit).Length == 0) c.Text(S(28), y + S(6), "새 항목 이름", S(14), false, Dim);
+            }
+            else c.Text(S(20), y + S(6), r.Label, S(15), false, Txt);
+            string pt = Text(r.PriceEdit);
+            FieldBg(c, S(FieldX), y, S(FieldW), pt, false);
+            string res = "";
+            uint rc = Dim;
+            if (!PriceInput.TryParse(pt, rate, out var v)) { res = "형식 오류"; rc = Warn; }
+            else if (v is double d) res = "= " + Parser.FmtPrice(d * rate) + "휘";
+            c.Text(S(FieldX + FieldW + 12), y + S(7), res, S(13), false, rc);
+        }
+        // 아래
+        c.Line(S(18), footerY, mainW - S(18), footerY, Line_);
+        c.Text(S(20), footerY + S(22), status, S(13), false, dirty ? Canvas.Argb(255, 220, 190, 120) : Dim);
+        var (bx, by, bw, bh) = ButtonRect;
+        c.FillRound(bx, by, bw, bh, S(10), Gold);
+        string label = ShopMode ? "적용" : "입력완료";
+        var (lw, lh) = c.Measure(label, S(16), true);
+        c.Text(bx + (bw - lw) / 2, by + (bh - lh) / 2, label, S(16), true, GoldText);
+        if (withTexts)
+        {
+            int ey = (S(FieldH) - S(20)) / 2;
+            c.Text(S(FieldX) + S(10), S(Header + 6) + ey, Text(rateEdit), S(15), false, Txt);
+            foreach (var r in rows)
+            {
+                if (r.NameEdit != IntPtr.Zero && Text(r.NameEdit).Length > 0) c.Text(S(18) + S(10), S(r.Y) + ey, Text(r.NameEdit), S(15), false, Txt);
+                if (Text(r.PriceEdit).Length > 0) c.Text(S(FieldX) + S(10), S(r.Y) + ey, Text(r.PriceEdit), S(15), false, Txt);
+            }
+        }
     }
 
     /// <summary>자동 읽기 칸: 몇 초마다 모든 칸을 다시 읽을지 (누르면 바로 적용·저장).</summary>
