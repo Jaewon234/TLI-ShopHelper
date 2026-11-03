@@ -159,12 +159,7 @@ sealed class Overlay
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)7, "시세 입력...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, cfg.Resell ? CHECKED : 0, (UIntPtr)2, "결정화 기준 (팔아서 결정, 수수료 반영)");
-        AppendMenuW(menu, cfg.Resell ? 0 : CHECKED, (UIntPtr)1, "직접 사용 기준 (시세)");
-        AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, 0, (UIntPtr)3, "시세 파일 열기 (prices.json, 저장하면 자동 반영)");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
-        AppendMenuW(menu, 0, (UIntPtr)6, "프로그램 로그 열기");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         var up = update;
         AppendMenuW(menu, installing ? GRAYED : 0, (UIntPtr)8,
@@ -178,12 +173,8 @@ sealed class Overlay
         DestroyMenu(menu);
         switch (cmd)
         {
-            case 1: SetMode("use"); break;
-            case 2: SetMode("resell"); break;
-            case 3: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.PricesPath}\"", null, 1); break;
             case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
-            case 6: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.LogPath}\"", null, 1); break;
             case 8: if (update != null) StartInstall(); else new Thread(() => CheckUpdate(manual: true)) { IsBackground = true }.Start(); break;
             case 10: cfg.CheckUpdates = !cfg.CheckUpdates; try { App.SaveSettings(cfg); } catch { } break;
             case 9: PostQuitMessage(0); break;
@@ -239,13 +230,6 @@ sealed class Overlay
                 Notify("업데이트 실패", e.Message);
             }
         }) { IsBackground = true, Name = "install" }.Start();
-    }
-
-    void SetMode(string mode)
-    {
-        cfg.Mode = mode;
-        try { App.SaveSettings(cfg); } catch { }
-        Engine?.Reevaluate();
     }
 
     void OpenEditor()
