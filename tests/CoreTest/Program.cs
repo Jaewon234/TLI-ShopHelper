@@ -85,13 +85,17 @@ sealed class FakeOcr : IOcr
     public int Calls;
     public bool Fail;   // 툴팁 등으로 글자를 못 읽는 상황
     public HashSet<string> MissInFullScan = new();   // 전체 화면 OCR 에서만 놓치는 글자 (칸 단위로는 읽힘)
+    public HashSet<string> MissUnlessPriceOnly = new(); // 가격 줄만 크게 읽을 때만 읽히는 글자 (작은 숫자)
+    public HashSet<string> NeverRead = new();          // 아예 못 읽는 글자 (매진되어 흐린 카드)
     public int MaxDim => 10000;
     public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
     {
         Calls++;
         if (Fail) return new();
         bool full = src.W > 1000;
-        var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
+        bool priceOnly = src.H < 40;
+        var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text)) && !NeverRead.Contains(t.Text)
+                                         && !(!priceOnly && MissUnlessPriceOnly.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
             .Select(t => new OcrWord(t.Text, (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
         // Windows OCR 처럼 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
         return words.GroupBy(w => Math.Round(w.Y)).Select(g => g.OrderBy(w => w.X).ToList()).ToList();
@@ -247,6 +251,23 @@ static class T
         Check(s6.Slots.Count == 8, $"8칸 - 실제 {s6.Slots.Count}");
         Check(s6.Slots.Select(x => x.Card?.Price ?? -1).SequenceEqual(new[] { 48, 74, 6, 12, 534, 165, 71, 500 }), "칸 단위로 다시 읽어 가격 채움");
         Check(s6.Slots[7].Card?.Item?.Name == "신비의 휘석(대)" && s6.Slots[7].Card?.Status == Verdict.Gamble, "맨 끝 신비의 휘석(대) = 도박");
+
+        Console.WriteLine("[5d3] 매진된 첫 칸(글자 못 읽음) + 가격 6 을 칸 전체로는 못 읽음 (구매 스크린샷)");
+        string[][] n7 = {
+            new[]{"최초의 불꽃","결정 "}, new[]{"에너지 코어 X","10"}, new[]{"최초의 불꽃","가루 X 60"}, new[]{"승화의 쐐기(매","직) X 20"},
+            new[]{"이계의 메아리 X","100"}, new[]{"에너지 코어 X","20"}, new[]{"이계의 메아리 X","10"}, new[]{"신비의 휘석(대)"} };
+        string[] p7 = { "매진", "74", "6", "12", "534", "165", "71", "500" };
+        var ocr7 = new FakeOcr { NeverRead = new() { "결정 ", "매진" }, MissUnlessPriceOnly = new() { "6", "500" } };
+        var sc7 = Scene.Make(n7, p7);
+        sc7.Items.RemoveAll(t => t.Text == "최초의" && t.B.X1 < 500); sc7.Items.RemoveAll(t => t.Text == "불꽃" && t.B.X1 < 500);
+        sc7.Items.Add(new TextItem("흐린카드그림", new Box(400, 196, 486, 270)));   // 글자는 못 읽지만 카드 그림은 있음
+        ocr7.NeverRead.Add("흐린카드그림");
+        var tr7 = new Tracker(ocr7, cfg) { Log = m => Console.WriteLine("    log: " + m) };
+        double t7 = 0; tr7.Reset(t7);
+        Run(tr7, ocr7, sc7, ref t7, 30);
+        var s7 = tr7.Snap();
+        Check(s7.Slots.Count == 8 && Math.Abs(s7.Slots[0].R.Cx - 443) < 6, $"첫 칸도 칸으로 잡음 (8칸) - 실제 {s7.Slots.Count}칸, 첫 칸 {s7.Slots[0].R.Cx:0}");
+        Check(s7.Slots[2].Card?.Price == 6 && s7.Slots[7].Card?.Price == 500, $"가격 줄만 크게 다시 읽어 6, 500 - {s7.Slots[2].Card?.Price}, {s7.Slots[7].Card?.Price}");
 
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);

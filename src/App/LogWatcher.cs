@@ -9,8 +9,13 @@ sealed class LogWatcher
     static readonly Regex Open = new(@"Page@ OpenView GroceryStoreV3\s*$", RegexOptions.Compiled);
     static readonly Regex Close = new(@"Page@ CloseView \d+_GroceryStoreV3Ctrl", RegexOptions.Compiled);
 
+    static readonly Regex AnyOpen = new(@"Page@ OpenView (\S+)\s*$", RegexOptions.Compiled);
+    static readonly Regex AnyClose = new(@"Page@ CloseView \d+_(\S+?)Ctrl\s*$", RegexOptions.Compiled);
+
     readonly string path;
     readonly Action<bool> onChange;
+    /// <summary>상점 말고 다른 창이 열리고 닫힐 때 (이름, 열림)</summary>
+    public Action<string, bool>? OnView;
     public bool IsOpen { get; private set; }
 
     public LogWatcher(string path, Action<bool> onChange) { this.path = path; this.onChange = onChange; }
@@ -77,6 +82,13 @@ sealed class LogWatcher
 
     void Handle(string line)
     {
+        if (IsOpen && OnView != null)
+        {
+            var mo = AnyOpen.Match(line);
+            if (mo.Success && mo.Groups[1].Value != "GroceryStoreV3") OnView(mo.Groups[1].Value, true);
+            var mc = AnyClose.Match(line);
+            if (mc.Success && mc.Groups[1].Value != "GroceryStoreV3") OnView(mc.Groups[1].Value, false);
+        }
         if (Open.IsMatch(line)) { if (!IsOpen) { IsOpen = true; onChange(true); } }
         else if (Close.IsMatch(line)) { if (IsOpen) { IsOpen = false; onChange(false); } }
     }

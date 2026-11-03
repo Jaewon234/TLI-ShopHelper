@@ -22,6 +22,9 @@ sealed class Overlay
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     volatile Updater.Release? update;
     public string? UpdatedFrom;
+    volatile bool popupOpen;
+    /// <summary>상점 안 다른 창(구매 창 등)이 열렸는지. 바뀌었으면 true.</summary>
+    public bool SetPopup(bool open) { if (popupOpen == open) return false; popupOpen = open; return true; }
     readonly ProgressWindow progress = new();
     volatile bool installing;
     /// <summary>오버레이가 화면 캡처에서 빠졌는지 (null = 아직 확인 전).</summary>
@@ -428,7 +431,7 @@ sealed class Overlay
                     break;
             }
         }
-        DrawSummary(c, s, client, th);
+        if (!popupOpen) DrawSummary(c, s, client, th);   // 구매 창 등이 열려 있으면 그 자리를 비움
     }
 
     string Efficiency(Card cd)

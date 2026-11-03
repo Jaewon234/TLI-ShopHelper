@@ -41,6 +41,7 @@ public sealed class Tracker
         public Card? Card;
         public bool Pending;
         public bool Stale;   // 다시 읽기에 실패해서 이전 결과를 보여주는 중 (계속 다시 시도)
+        public int Fails;    // 연속 실패 횟수 (다시 시도 간격을 늘림)
         public double ChangeT;
     }
 
@@ -124,7 +125,7 @@ public sealed class Tracker
             var fp = Fingerprint.Make(f, s.R);
             var pfp = Fingerprint.Make(f, s.PriceR);
             cellsAll = Fingerprint.Cells(fp);
-            if (!s.Pending && (s.Card == null || s.Stale) && now - s.ChangeT >= RetryMs)
+            if (!s.Pending && (s.Card == null || s.Stale) && now - s.ChangeT >= RetryMs * (1 << Math.Min(3, s.Fails)))
             {
                 // 못 읽은 칸은 0.5초마다 다시 시도
                 s.Pending = true; s.ChangeT = now - StableMs; s.PrevFp = fp; s.PrevPfp = pfp;
@@ -184,6 +185,7 @@ public sealed class Tracker
             }
         }
         var card = OcrSlot(f, s);
+        s.Fails = card == null ? s.Fails + 1 : 0;   // 계속 못 읽으면 0.5 → 1 → 2 → 4초 간격으로
         if (card == null && s.Card != null)
         {
             s.Stale = true;          // 못 읽으면 이전 결과를 그대로 보여주고 다시 시도 (번쩍임 방지)
@@ -209,8 +211,20 @@ public sealed class Tracker
         var (cards, _) = Parser.Analyze(lines, cfg);
         if (cards.Count == 0)
         {
-            Log?.Invoke("칸 읽기 실패: " + string.Join(" | ", lines.Select(l => string.Join(" ", l.Select(w => w.Text)))));
-            return null;
+            // 작은 숫자(예: 가격 6)는 칸 전체로 읽으면 놓치는 경우가 많음 → 가격 줄만 크게 확대해서 다시
+            var pr = s.PriceR;
+            var pcrop = Src(f).Crop((int)pr.X1, (int)pr.Y1, (int)pr.W, (int)pr.H).AutoContrast();
+            double psc = Math.Min(4.0, ocr.MaxDim / (double)Math.Max(pcrop.W, pcrop.H));
+            var plines = ocr.Recognize(pcrop.Scale(psc), pr, psc);
+            foreach (var ws in plines)
+                foreach (var w in ws) { w.X = w.X / psc + pr.X1; w.Y = w.Y / psc + pr.Y1; w.W /= psc; w.H /= psc; }
+            var nameLines = lines.Where(l => l.Count > 0 && l.Average(w => w.Y + w.H / 2) < pr.Y1).ToList();
+            (cards, _) = Parser.Analyze(nameLines.Concat(plines).ToList(), cfg);
+            if (cards.Count == 0)
+            {
+                Log?.Invoke("칸 읽기 실패: " + string.Join(" | ", lines.Concat(plines).Select(l => string.Join(" ", l.Select(w => w.Text)))));
+                return null;
+            }
         }
         return cards.OrderBy(c => Math.Abs(c.B.Cx - s.R.Cx)).First();
     }
@@ -236,7 +250,7 @@ public sealed class Tracker
             return;
         }
         foreach (var c in cards) Parser.Evaluate(c, cfg);
-        slots = BuildSlots(cards, segs);
+        slots = BuildSlots(cards, segs, f);
         refresh = rf?.B;
         foreach (var s in slots)
         {
@@ -260,7 +274,7 @@ public sealed class Tracker
         return a.Length == 0 ? 0 : a[a.Length / 2];
     }
 
-    static List<Slot> BuildSlots(List<Card> cards, List<Seg>? segs = null)
+    static List<Slot> BuildSlots(List<Card> cards, List<Seg>? segs = null, Frame? f = null)
     {
         double h = Median(cards.Select(c => c.H));
         // 줄별로 묶기 (UI 크기에 따라 8개 한 줄, 6+2 두 줄 등)
@@ -303,9 +317,20 @@ public sealed class Tracker
                 System.Text.RegularExpressions.Regex.IsMatch(sg.Text, "[가-힣]") &&
                 Math.Abs(sg.B.Cx - x) < spacing * 0.35 && sg.B.Y1 >= nameTop - h && sg.B.Y2 <= nameBot + h &&
                 Math.Abs(sg.H - h) < h * 0.4);
+            // 글자를 하나도 못 읽은 카드(매진되어 흐린 카드 등)도: 그 자리에 카드 그림이 있으면 칸으로 봄
+            Box RAt(double x) => new(x - half, py1 - 4.6 * h, x + half, py2 + 0.2 * h);
+            double refStd = f == null ? 0 : Median(cx.Select(x => LumaStd(f, RAt(x))));
+            bool HasCard(double x)
+            {
+                if (f == null || refStd <= 0) return false;
+                var b = RAt(x);
+                if (b.X1 < 0 || b.X2 > f.W) return false;
+                return LumaStd(f, b) > refStd * 0.35;
+            }
+            bool Occupied(double x) => HasName(x) || HasCard(x);
             double first = cx[0], last = cx[^1];
-            for (int k = 0; k < 8 && HasName(first - spacing); k++) first -= spacing;
-            for (int k = 0; k < 8 && HasName(last + spacing); k++) last += spacing;
+            for (int k = 0; k < 8 && Occupied(first - spacing); k++) first -= spacing;
+            for (int k = 0; k < 8 && Occupied(last + spacing); k++) last += spacing;
             // 줄 안의 빈 칸(못 읽은 칸)도 일정한 간격으로 채움
             for (double x = first; x <= last + spacing * 0.5; x += spacing)
             {
@@ -320,6 +345,23 @@ public sealed class Tracker
             }
         }
         return slots;
+    }
+
+    /// <summary>칸 영역 밝기의 표준편차 (카드 그림·글자가 있으면 크고, 빈 배경이면 작음).</summary>
+    static double LumaStd(Frame f, Box b)
+    {
+        int x0 = Math.Max(0, (int)b.X1), x1 = Math.Min(f.W, (int)b.X2), y0 = Math.Max(0, (int)b.Y1), y1 = Math.Min(f.H, (int)b.Y2);
+        if (x1 - x0 < 4 || y1 - y0 < 4) return 0;
+        double sum = 0, sq = 0; int n = 0;
+        for (int y = y0; y < y1; y += 2)
+            for (int x = x0; x < x1; x += 2)
+            {
+                int o = (y * f.W + x) * 4;
+                double v = (f.Px[o] * 29 + f.Px[o + 1] * 150 + f.Px[o + 2] * 77) >> 8;
+                sum += v; sq += v * v; n++;
+            }
+        double m = sum / n;
+        return Math.Sqrt(Math.Max(0, sq / n - m * m));
     }
 
     void CountPage()

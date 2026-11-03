@@ -151,8 +151,20 @@ sealed class Engine
     public List<string> UnknownNames() => unknown;
     public void RequestSave() { saveRequested = true; wake.Set(); }
 
+    readonly HashSet<string> popups = new();
+    /// <summary>상점 안에서 다른 창(구매 창 등)이 열려 있는지: 열려 있으면 왼쪽 패널을 숨김.</summary>
+    bool PopupOpen { get { lock (popups) return popups.Count > 0; } }
+
+    void OnView(string name, bool open)
+    {
+        lock (popups) { if (open) popups.Add(name); else popups.Remove(name); }
+        App.Log($"상점 안 창 {(open ? "열림" : "닫힘")}: {name}");
+        wake.Set();
+    }
+
     void OnShop(bool open)
     {
+        lock (popups) popups.Clear();
         App.Log(open ? "상점 열림" : "상점 닫힘");
         shopOpen = open;
         if (open) openedNow = true;
@@ -169,7 +181,7 @@ sealed class Engine
                 App.Log($"로그: {path} ({how})");
                 LogInfo = $"로그 연결됨 ({how})";
                 overlay.Notify("신들의 강복 도우미 실행 중", $"로그를 찾았습니다 ({how}).\n상점을 열면 자동으로 켜집니다.");
-                new LogWatcher(path, OnShop).Start();
+                new LogWatcher(path, OnShop) { OnView = OnView }.Start();
                 return;
             }
             LogInfo = "로그를 못 찾음 · 게임을 켜면 다시 찾습니다";
@@ -242,7 +254,7 @@ sealed class Engine
             if (rect != null && fg != hwnd && fg != IntPtr.Zero && fg == overlay.EditorHwnd)
             {
                 // 시세 입력 창을 쓰는 동안: 화면 추적은 멈추고 결과만 계속 보여줌
-                overlay.Panel(PanelState.Visible, rect.Value, unknownVer);
+                overlay.Panel(PopupOpen ? PanelState.Hidden : PanelState.Visible, rect.Value, unknownVer);
                 if (!shown) { overlay.Show(rect.Value, tracker.Snap()); shown = true; }
                 wake.WaitOne(60);
                 continue;
@@ -268,7 +280,9 @@ sealed class Engine
                 if (!un.SequenceEqual(unknown)) unknownVer++;
                 unknown = un;
             }
-            overlay.Panel(PanelState.Visible, rect.Value, unknownVer);
+            bool pop = PopupOpen;
+            overlay.Panel(pop ? PanelState.Hidden : PanelState.Visible, rect.Value, unknownVer);
+            if (overlay.SetPopup(pop)) dirty = true;
             if (dirty || !shown || overlay.RectChanged(rect.Value))
             {
                 overlay.Show(rect.Value, tracker.Snap());
