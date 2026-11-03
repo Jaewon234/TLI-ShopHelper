@@ -146,7 +146,7 @@ sealed class Editor
 
         loading = true;
         rows.Clear();
-        rateEdit = FieldEdit(Parser.FmtPrice(cfg.CrystalRate), S(FieldX), S(Header + 6), ID_RATE);
+        rateEdit = FieldEdit(Parser.FmtPrice(cfg.HuiseokPrice), S(FieldX), S(Header + 6), ID_RATE);
         int y = y0, i = 0;
         foreach (var it in items) AddRow(it.Name, it.Price is double p ? Parser.FmtPrice(p) : "", it, i++, editableName: false, ref y);
         foreach (var name in extra) AddRow(name, "", null, i++, editableName: true, ref y);
@@ -186,8 +186,9 @@ sealed class Editor
 
     string RowName(Row r) => r.NameEdit != IntPtr.Zero ? Text(r.NameEdit).Trim() : r.Label;
 
+    /// <summary>입력칸은 '신력의 휘석 1개 = 몇 결정'. 계산에는 결정 1개 = 몇 휘석(역수)을 씀.</summary>
     double RateInput() =>
-        PriceInput.TryParse(Text(rateEdit), 1, out var v) && v is double d && d > 0 ? d : PriceInput.CrystalPrice(cfg);
+        PriceInput.TryParse(Text(rateEdit), 1, out var v) && v is double d && d > 0 ? 1 / d : PriceInput.CrystalPrice(cfg);
 
     // ---------------- 그리기 ----------------
     void Paint()
@@ -213,9 +214,9 @@ sealed class Editor
             }
             // 결정 환율
             int ry = S(Header + 6);
-            c.Text(S(20), ry + S(6), "결정 1개 =", S(15), false, Muted);
+            c.Text(S(20), ry + S(6), "신력의 휘석 1개 =", S(15), false, Muted);
             FieldBg(c, S(FieldX), ry, S(FieldW), Text(rateEdit), true);
-            c.Text(S(FieldX + FieldW + 12), ry + S(7), "휘석", S(13), false, Dim);
+            c.Text(S(FieldX + FieldW + 12), ry + S(7), "결정", S(13), false, Dim);
             c.Line(S(18), S(Header + 44), winW - S(18), S(Header + 44), Line_);
             // 항목
             double rate = RateInput();
@@ -262,8 +263,9 @@ sealed class Editor
     {
         var errors = new List<string>();
         double rate = PriceInput.CrystalPrice(cfg);
-        if (PriceInput.TryParse(Text(rateEdit), 1, out var rv) && rv is double r0 && r0 > 0) rate = r0;
-        else errors.Add("결정 환율");
+        double? huiseok = null;
+        if (PriceInput.TryParse(Text(rateEdit), 1, out var rv) && rv is double r0 && r0 > 0) { rate = 1 / r0; huiseok = r0; }
+        else errors.Add("신력의 휘석 시세");
 
         // 결정·도박 항목은 그대로 두고, 나머지만 입력값으로 바꿈
         var items = cfg.Items.Where(i => i.IsCrystal || i.IsGamble).ToList();
@@ -286,7 +288,7 @@ sealed class Editor
         // 창을 연 뒤에 바깥에서 추가된 항목은 지우지 않음
         items.AddRange(normalOld.Where(o => !seen.Contains(o) && !rows.Any(r => r.Orig == o)));
 
-        cfg.CrystalRate = rate;
+        if (huiseok is double hv) cfg.HuiseokPrice = hv; else cfg.CrystalRate = rate;
         cfg.Items = items;
         try { App.SavePrices(cfg); } catch (Exception e) { errors.Add("저장 실패: " + e.Message); }
         applied();

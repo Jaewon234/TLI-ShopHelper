@@ -119,7 +119,7 @@ static class T
     static int Main(string[] args)
     {
         if (args.Length == 2 && args[0] == "--write-config") { new Config().Save(args[1]); return 0; }
-        var cfg = new Config();
+        var cfg = new Config { CrystalRate = 50 };   // 테스트는 결정 1개 = 50휘석 기준
         Console.WriteLine("[1] 파서: 스크린샷 배치");
         var ocr = new FakeOcr { Scene = Scene.Make(NamesA, PricesA) };
         var (cards, refresh) = Parser.Analyze(ocr.Recognize(new Frame(1, 1), new Box(0, 0, 1920, 1080), 1), cfg);
@@ -287,6 +287,17 @@ static class T
         var re = Config.Load(tmp);
         Check(re.Items.Single(i => i.Name == "이계의 메아리").Price == 0.13, "메아리 0.13 그대로");
         Check(re.Items.Single(i => i.Name == "절대자 엠버").Price == 20.5, "새 기본 항목만 추가");
+
+        Console.WriteLine("[10b] 신력의 휘석 1개 = 0.018 결정");
+        var hc = new Config();
+        Check(hc.HuiseokPrice == 0.018 && Math.Abs(hc.CrystalRate - 55.5555556) < 1e-6, $"기본 0.018결 → 결정 1개 = {hc.CrystalRate:0.####}휘");
+        var hdir = Path.Combine(Path.GetTempPath(), "shophelper_h_" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(hdir);
+        hc.HuiseokPrice = 0.017; hc.SaveSplit(Path.Combine(hdir, "s.json"), Path.Combine(hdir, "p.json"));
+        var hl = Config.LoadSplit(Path.Combine(hdir, "s.json"), Path.Combine(hdir, "p.json"));
+        Check(Parser.FmtPrice(hl.HuiseokPrice) == "0.017" && File.ReadAllText(Path.Combine(hdir, "p.json")).Contains("\"huiseok_price\": 0.017"), "저장·불러오기 후에도 0.017 그대로");
+        var ec = new Card { Name = "에너지코어", Qty = 20, Price = 40 }; Parser.Evaluate(ec, hl);
+        Check(ec.Value == Math.Ceiling(Math.Round(0.04 / 0.017 * 20 * 0.875, 6)), $"계산에 반영 (코어 20개 결정화 = {ec.Value}휘)");
+        Directory.Delete(hdir, true);
 
         Console.WriteLine("[11] 시세(prices.json) / 설정(settings.json) 분리");
         var dir = Path.Combine(Path.GetTempPath(), "shophelper_split_" + Guid.NewGuid().ToString("N"));

@@ -76,7 +76,15 @@ public sealed class Config
     [JsonPropertyName("log_path")] public string LogPath { get; set; } = "auto";
     [JsonPropertyName("_unit_설명")] public string UnitNote { get; set; } = "price 는 1개당 결정. crystal_rate = 결정 1개가 몇 휘석인지";
     [JsonPropertyName("price_unit")] public string PriceUnit { get; set; } = "crystal";
-    [JsonPropertyName("crystal_rate")] public double CrystalRate { get; set; } = 50;
+    /// <summary>결정 1개 = 몇 휘석 (계산용). 입력은 '신력의 휘석 1개 = 몇 결정' 으로 받음 → HuiseokPrice</summary>
+    [JsonPropertyName("crystal_rate")] public double CrystalRate { get; set; } = 1 / DefaultHuiseokPrice;
+    public const double DefaultHuiseokPrice = 0.018;
+    /// <summary>신력의 휘석 1개 = 몇 결정</summary>
+    [JsonIgnore] public double HuiseokPrice
+    {
+        get => CrystalRate > 0 ? Math.Round(1 / CrystalRate, 8) : DefaultHuiseokPrice;
+        set { if (value > 0) CrystalRate = 1 / value; }
+    }
     [JsonPropertyName("_mode_설명")] public string ModeNote { get; set; } = "resell = 결정화 기준(팔아서 결정으로 받을 때: 수수료 떼고 올림한 실수령보다 싸야 이득, 기본), use = 직접 쓸 때(시세보다 싸면 이득)";
     [JsonPropertyName("mode")] public string Mode { get; set; } = "resell";
     [JsonPropertyName("tax_rate")] public double TaxRate { get; set; } = 0.125;
@@ -186,8 +194,9 @@ public sealed class Config
 
     sealed class PricesFile
     {
-        [JsonPropertyName("_설명")] public string Note { get; set; } = "시세 (1개당 결정). 업데이트해도 바뀌지 않습니다. crystal_rate = 결정 1개가 몇 휘석인지";
+        [JsonPropertyName("_설명")] public string Note { get; set; } = "시세 (1개당 결정). 업데이트해도 바뀌지 않습니다. huiseok_price = 신력의 휘석 1개가 몇 결정인지";
         [JsonPropertyName("price_unit")] public string PriceUnit { get; set; } = "crystal";
+        [JsonPropertyName("huiseok_price")] public double? HuiseokPrice { get; set; }
         [JsonPropertyName("crystal_rate")] public double CrystalRate { get; set; } = 50;
         [JsonPropertyName("items")] public List<ItemDef> Items { get; set; } = new();
     }
@@ -199,7 +208,7 @@ public sealed class Config
     }
 
     public void SavePrices(string pricesPath) =>
-        WriteAtomic(pricesPath, JsonSerializer.Serialize(new PricesFile { PriceUnit = PriceUnit, CrystalRate = CrystalRate, Items = Items }, Opts));
+        WriteAtomic(pricesPath, JsonSerializer.Serialize(new PricesFile { PriceUnit = PriceUnit, HuiseokPrice = HuiseokPrice, CrystalRate = CrystalRate, Items = Items }, Opts));
 
     public void SaveSettings(string settingsPath)
     {
@@ -241,6 +250,7 @@ public sealed class Config
             using (var doc = JsonDocument.Parse(json, docOpts))
                 if (!doc.RootElement.TryGetProperty("price_unit", out _)) pf.PriceUnit = "";
             cfg.PriceUnit = pf.PriceUnit; cfg.CrystalRate = pf.CrystalRate; cfg.Items = pf.Items;
+            if (pf.HuiseokPrice is double hp && hp > 0) cfg.HuiseokPrice = hp;   // 입력한 값 그대로 (0.018)
         }
         else changed = true;
         changed |= cfg.Migrate();
