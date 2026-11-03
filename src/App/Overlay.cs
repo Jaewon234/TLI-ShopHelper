@@ -114,6 +114,7 @@ sealed class Overlay
         AddTray();
         App.Log("트레이 아이콘 등록");
         if (!RegisterHotKey(msgWnd, 1, 0x2 | 0x4 | 0x4000, 0x50)) App.Log("단축키 Ctrl+Shift+P 등록 실패 (다른 프로그램이 사용 중)");
+        if (!RegisterHotKey(msgWnd, 2, 0x2 | 0x4 | 0x4000, 0x53)) App.Log("단축키 Ctrl+Shift+S 등록 실패 (다른 프로그램이 사용 중)");
         editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
         editor.Init("ShopHelperEditor", inst);
         onReady();
@@ -181,6 +182,7 @@ sealed class Overlay
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)7, "시세 입력...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
+        AppendMenuW(menu, 0, (UIntPtr)11, "지금 화면 그대로 저장  (Ctrl+Shift+S)");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         var up = update;
@@ -211,6 +213,7 @@ sealed class Overlay
         {
             case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
+            case 11: SaveAsSeen(); break;
             case 8: if (update != null) StartInstall(); else new Thread(() => CheckUpdate(manual: true)) { IsBackground = true }.Start(); break;
             case 10: cfg.CheckUpdates = !cfg.CheckUpdates; try { App.SaveSettings(cfg); } catch { } break;
             case 9: PostQuitMessage(0); break;
@@ -286,6 +289,72 @@ sealed class Overlay
         }) { IsBackground = true, Name = "install" }.Start();
     }
 
+    /// <summary>
+    /// 지금 화면 그대로 저장: 게임 화면 + 오버레이 + 시세 창을 직접 합쳐서 PNG 로.
+    /// (오버레이와 시세 창은 OCR 에 섞이지 않게 화면 캡처에서 빠져 있어서, 일반 캡처 도구로는 안 찍힘)
+    /// </summary>
+    void SaveAsSeen()
+    {
+        try
+        {
+            (int X, int Y, int W, int H) r; bool vis;
+            lock (gate) { r = placed; vis = visible; }
+            if (r.W <= 0)
+            {
+                var gh = GameWindow.Find(cfg);
+                if (GameWindow.ClientRect(gh) is { } gr) r = gr;
+            }
+            if (r.W <= 0) { Notify("저장 실패", "게임 창을 찾지 못했습니다."); return; }
+            using var g = new Grabber();
+            var f = g.Grab(r.X, r.Y, r.W, r.H);
+            var outF = new Frame((byte[])f.Px.Clone(), f.W, f.H);
+            // 1) 오버레이 (미리 곱한 알파로 겹치기)
+            if (vis && dibBits != IntPtr.Zero && dibW == r.W && dibH == r.H)
+            {
+                var ov = new byte[r.W * r.H * 4];
+                Marshal.Copy(dibBits, ov, 0, ov.Length);
+                var px = outF.Px;
+                for (int i = 0; i < ov.Length; i += 4)
+                {
+                    int a = ov[i + 3];
+                    if (a == 0) continue;
+                    for (int c = 0; c < 3; c++) px[i + c] = (byte)Math.Min(255, ov[i + c] + px[i + c] * (255 - a) / 255);
+                }
+            }
+            // 2) 시세 창 / [시세 입력] 버튼
+            if (editor != null)
+                foreach (var wnd in editor.VisibleWindows())
+                {
+                    GetWindowRect(wnd, out var wr);
+                    int ww = wr.Right - wr.Left, wh = wr.Bottom - wr.Top;
+                    if (ww <= 0 || wh <= 0) continue;
+                    using var wg = new Grabber();
+                    var wf = wg.GrabWindowAny(wnd, ww, wh);
+                    if (wf == null) continue;
+                    int ox = wr.Left - r.X, oy = wr.Top - r.Y;
+                    var shape = CreateRectRgn(0, 0, 0, 0);
+                    bool hasShape = GetWindowRgn(wnd, shape) != 0;   // 둥근 모서리 모양 (없으면 사각형 전체)
+                    for (int y = 0; y < wh; y++)
+                    {
+                        int ty = oy + y; if (ty < 0 || ty >= r.H) continue;
+                        for (int x = 0; x < ww; x++)
+                        {
+                            int tx = ox + x; if (tx < 0 || tx >= r.W) continue;
+                            int so = (y * ww + x) * 4, to = (ty * r.W + tx) * 4;
+                            if (hasShape && !PtInRegion(shape, x, y)) continue;   // 둥근 모서리 바깥은 건너뜀
+                            outF.Px[to] = wf.Px[so]; outF.Px[to + 1] = wf.Px[so + 1]; outF.Px[to + 2] = wf.Px[so + 2];
+                        }
+                    }
+                    DeleteObject(shape);
+                }
+            string path = Path.Combine(App.Dir, $"screen_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+            ImageFile.SavePng(outF, path);
+            App.Log("지금 화면 그대로 저장: " + path);
+            ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", $"/select,\"{path}\"", null, 1);
+        }
+        catch (Exception e) { App.Log("화면 저장 실패: " + e); Notify("저장 실패", e.Message); }
+    }
+
     void OpenEditor()
     {
         try { editor?.OpenTray(); }
@@ -315,7 +384,7 @@ sealed class Overlay
             switch (msg)
             {
                 case 0x312: // WM_HOTKEY
-                    OpenEditor();
+                    if (w.ToInt64() == 2) SaveAsSeen(); else OpenEditor();
                     return IntPtr.Zero;
                 case MSG_UPDATE:
                     (int X, int Y, int W, int H) r;

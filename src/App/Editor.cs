@@ -89,6 +89,13 @@ sealed class Editor
     bool expanded;   // 상점 안에서 입력 창이 펼쳐져 있는지
     bool ToggleExists => toggle != IntPtr.Zero && IsWindow(toggle);
 
+    /// <summary>지금 화면에 보이는 시세 창/버튼 (화면 그대로 저장용)</summary>
+    public IEnumerable<IntPtr> VisibleWindows()
+    {
+        if (ToggleExists && IsWindowVisible(toggle)) yield return toggle;
+        if (Exists && IsWindowVisible(Hwnd)) yield return Hwnd;
+    }
+
     public void ShowInShop((int X, int Y, int W, int H) g)
     {
         game = g;
