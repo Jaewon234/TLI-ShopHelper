@@ -57,6 +57,26 @@ static class App
     public static void SaveSettings(Config c) { c.SaveSettings(SettingsPath); ConfigSaved(); }
 
     public static readonly string LogPath = Path.Combine(Dir, "helper.log");
+
+    /// <summary>공유용 '지금 화면 그대로 저장' (screen_날짜.png)</summary>
+    public static string ShareDir => Folder("캡처");
+    /// <summary>문제 확인용 '현재 화면 저장' (capture_날짜.png + _result.txt/png)</summary>
+    public static string DebugDir => Folder("문제확인");
+    static string Folder(string name) { var d = Path.Combine(DataDir, name); Directory.CreateDirectory(d); return d; }
+
+    /// <summary>예전 버전이 exe 폴더에 바로 저장한 캡처 파일을 각 폴더로 정리.</summary>
+    public static void TidyShots()
+    {
+        try
+        {
+            foreach (var (pattern, dir) in new[] { ("screen_*.png", "캡처"), ("capture_*", "문제확인") })
+                foreach (var f in Directory.EnumerateFiles(DataDir, pattern).ToList())
+                {
+                    try { File.Move(f, Path.Combine(Folder(dir), Path.GetFileName(f)), overwrite: true); } catch { }
+                }
+        }
+        catch { }
+    }
     static readonly object logLock = new();
 
     public static void Log(string msg)
@@ -84,7 +104,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.6";
+    public const string Version = "1.7.7";
 
     [STAThread]
     static int Main(string[] args)
@@ -121,6 +141,7 @@ static class App
         catch (Exception e) { Error("시세/설정 파일을 읽을 수 없습니다:\n" + e.Message + "\n\n" + DataDir); return 1; }
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
+        TidyShots();
         IOcr ocr;
         try
         {
@@ -360,7 +381,7 @@ sealed class Engine
             using var g = new Grabber();
             var f = rect is { } r ? g.Grab(r.X, r.Y, r.W, r.H) : null;
             if (f == null) { overlay.Notify("저장 실패", "게임 창을 찾지 못했습니다."); return; }
-            string baseName = Path.Combine(App.Dir, $"capture_{DateTime.Now:yyyyMMdd_HHmmss}");
+            string baseName = Path.Combine(App.DebugDir, $"capture_{DateTime.Now:yyyyMMdd_HHmmss}");
             ImageFile.SavePng(f, baseName + ".png");
             Diagnose.Run(f, ocr, cfg, baseName + "_result");
             overlay.Notify("화면 저장됨", Path.GetFileName(baseName) + ".png / _result.txt");

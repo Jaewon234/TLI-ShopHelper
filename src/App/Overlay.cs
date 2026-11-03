@@ -388,7 +388,7 @@ sealed class Overlay
                     }
                     DeleteObject(shape);
                 }
-            string path = Path.Combine(App.Dir, $"screen_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+            string path = Path.Combine(App.ShareDir, $"screen_{DateTime.Now:yyyyMMdd_HHmmss}.png");
             ImageFile.SavePng(outF, path);
             App.Log("지금 화면 그대로 저장: " + path);
             ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", $"/select,\"{path}\"", null, 1);
