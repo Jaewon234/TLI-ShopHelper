@@ -329,6 +329,8 @@ sealed class Overlay
                     Frame(dc, d, Red, 1);
                     Label(dc, d.Cx, d.Y1 - 4, Gain(c.Diff!.Value), Red, basePx - 1, 1);
                     break;
+                case Verdict.Sold:
+                    break; // 매진은 게임이 이미 표시하므로 아무것도 그리지 않음
                 default:
                     Frame(dc, d, Gray, 1);
                     Label(dc, d.Cx, d.Y1 - 4, c.Item == null ? "모르는 항목" : "시세 없음", Gray, basePx - 1, 1);

@@ -87,8 +87,12 @@ public static class Parser
         foreach (var c in cols)
         {
             int idx = -1;
+            bool sold = false;
             for (int i = c.Count - 1; i >= 0; i--)
+            {
                 if (IsPrice(c[i].Text)) { idx = i; break; }
+                if (Norm(c[i].Text).Contains("매진")) { idx = i; sold = true; break; }
+            }
             if (idx <= 0) continue;
             string nameText = Norm(string.Concat(c.Take(idx).Select(s => s.Text)));
             if (!Hangul.IsMatch(nameText)) continue;
@@ -104,21 +108,31 @@ public static class Parser
                 Raw = string.Join(" / ", used.Select(s => s.Text)),
                 Name = name,
                 Qty = qty,
-                Price = int.Parse(NonDigit.Replace(c[idx].Text, "")),
+                Price = sold ? 0 : int.Parse(NonDigit.Replace(c[idx].Text, "")),
+                Sold = sold,
                 B = new Box(used.Min(s => s.B.X1), used.Min(s => s.B.Y1), used.Max(s => s.B.X2), used.Max(s => s.B.Y2)),
                 PriceBox = c[idx].B,
                 H = Median(c.Select(s => s.H)),
             });
         }
         if (cards.Count == 0) return cards;
-        // 상품 칸은 같은 높이(가격 줄)에 나란히 있으므로 가장 많은 줄만 남김
+        // UI 크기에 따라 칸이 한 줄(8개) 또는 여러 줄(6+2 등)로 나옴.
+        // 글자 크기가 다른 것(다른 UI 글자)은 빼고, 줄 순서(위→아래, 왼→오른)로 정렬.
+        double mh = Median(cards.Select(c => c.H));
+        cards = cards.Where(c => c.H > mh * 0.6 && c.H < mh * 1.6).ToList();
+        return SortRows(cards);
+    }
+
+    /// <summary>가격 줄 높이가 같은 카드끼리 한 줄로 묶어서 위→아래, 왼→오른 순서로.</summary>
+    public static List<Card> SortRows(List<Card> cards)
+    {
         var rows = new List<List<Card>>();
         foreach (var cd in cards.OrderBy(c => c.PriceBox.Y1))
         {
             var row = rows.FirstOrDefault(r => Math.Abs(r[0].PriceBox.Y1 - cd.PriceBox.Y1) < 1.5 * cd.H);
             if (row == null) rows.Add(new List<Card> { cd }); else row.Add(cd);
         }
-        return rows.OrderByDescending(r => r.Count).First().OrderBy(c => c.B.X1).ToList();
+        return rows.SelectMany(r => r.OrderBy(c => c.B.X1)).ToList();
     }
 
     /// <summary>difflib.SequenceMatcher.ratio 와 비슷한 유사도 (LCS 기반).</summary>
@@ -149,6 +163,7 @@ public static class Parser
     {
         cd.Item = Match(cd.Name, cfg.Items);
         cd.Value = null; cd.Diff = null;
+        if (cd.Sold) { cd.Status = Verdict.Sold; return; }
         if (cd.Item?.Price is not double unit) { cd.Status = Verdict.Unknown; return; }
         double market = unit * cd.Qty;
         cd.Value = cfg.Resell && cd.Item.Taxed
@@ -185,7 +200,7 @@ public static class Parser
             i++;
             if (c == null) { sb.AppendLine($"{i}. (읽기 실패)"); continue; }
             string nm = c.Item?.Name ?? $"(모름) {c.Name}";
-            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", _ => "시세없음" };
+            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", Verdict.Sold => "매진", _ => "시세없음" };
             sb.AppendLine($"{i}. {nm} x{c.Qty} | 가격 {c.Price} | 가치 {Fmt(c.Value)} | {tag} {Fmt(c.Diff)}   [{c.Raw}]");
             if (c.Status == Verdict.Good) total += c.Diff!.Value;
         }

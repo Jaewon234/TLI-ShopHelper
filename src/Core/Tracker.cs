@@ -220,7 +220,7 @@ public sealed class Tracker
         {
             s.SettledFp = Fingerprint.Make(f, s.R);
             s.SettledPfp = Fingerprint.Make(f, s.PriceR);
-            s.Card = cards.FirstOrDefault(c => c.B.Cx >= s.R.X1 && c.B.Cx <= s.R.X2);
+            s.Card = cards.FirstOrDefault(c => c.B.Cx >= s.R.X1 && c.B.Cx <= s.R.X2 && c.PriceBox.Y1 >= s.R.Y1 && c.PriceBox.Y1 <= s.R.Y2);
             if (s.Card != null)
                 cache.Add(new CacheEntry { Fp = s.SettledFp, Pfp = s.SettledPfp, Card = s.Card.Clone() });
             else
@@ -241,35 +241,51 @@ public sealed class Tracker
     static List<Slot> BuildSlots(List<Card> cards)
     {
         double h = Median(cards.Select(c => c.H));
-        double py1 = Median(cards.Select(c => c.PriceBox.Y1));
-        double py2 = Median(cards.Select(c => c.PriceBox.Y2));
-        var cx = cards.Select(c => c.B.Cx).OrderBy(x => x).ToList();
-        double spacing = double.MaxValue;
-        for (int i = 1; i < cx.Count; i++) spacing = Math.Min(spacing, cx[i] - cx[i - 1]);
-        if (spacing == double.MaxValue || spacing < 3 * h) spacing = cards.Max(c => c.B.W) * 1.2;
-        // 빈 칸(못 읽은 칸)도 일정한 간격으로 채움
-        var centers = new List<double>();
-        for (double x = cx[0]; x <= cx[^1] + spacing * 0.5; x += spacing)
+        // 줄별로 묶기 (UI 크기에 따라 8개 한 줄, 6+2 두 줄 등)
+        var rows = new List<List<Card>>();
+        foreach (var cd in cards.OrderBy(c => c.PriceBox.Y1))
         {
-            double near = cx.OrderBy(c => Math.Abs(c - x)).First();
-            centers.Add(Math.Abs(near - x) < spacing * 0.3 ? near : x);
+            var row = rows.FirstOrDefault(r => Math.Abs(r[0].PriceBox.Y1 - cd.PriceBox.Y1) < 1.5 * h);
+            if (row == null) rows.Add(new List<Card> { cd }); else row.Add(cd);
         }
-        // 비교 범위는 카드 안쪽만 (카드 폭 ≈ 간격의 83%). 카드 밖 배경이 섞이면
+        // 칸 간격 = 같은 줄 안에서 가장 가까운 두 칸 사이
+        double spacing = double.MaxValue;
+        foreach (var r in rows)
+        {
+            var xs = r.Select(c => c.B.Cx).OrderBy(x => x).ToList();
+            for (int i = 1; i < xs.Count; i++) spacing = Math.Min(spacing, xs[i] - xs[i - 1]);
+        }
+        if (spacing == double.MaxValue || spacing < 3 * h) spacing = cards.Max(c => c.B.W) * 1.15;
+        // 비교 범위는 카드 안쪽만 (카드 폭 = 간격의 83~90%). 카드 밖 배경이 섞이면
         // 마우스를 올려 카드만 어두워질 때 '바뀐 것'으로 잘못 잡힘.
         double half = spacing * 0.40;
         double dhalf = spacing * 0.44;
-        return centers.Select(c => new Slot
+        var slots = new List<Slot>();
+        foreach (var r in rows)
         {
-            R = new Box(c - half, py1 - 4.6 * h, c + half, py2 + 0.2 * h),
-            PriceR = new Box(c - half, py1 - 0.2 * h, c + half, py2 + 0.2 * h),
-            D = new Box(c - dhalf, py1 - 12.3 * h, c + dhalf, py2 + 0.6 * h),
-        }).ToList();
+            double py1 = Median(r.Select(c => c.PriceBox.Y1));
+            double py2 = Median(r.Select(c => c.PriceBox.Y2));
+            var cx = r.Select(c => c.B.Cx).OrderBy(x => x).ToList();
+            // 줄 안의 빈 칸(못 읽은 칸)도 일정한 간격으로 채움
+            for (double x = cx[0]; x <= cx[^1] + spacing * 0.5; x += spacing)
+            {
+                double near = cx.OrderBy(c => Math.Abs(c - x)).First();
+                double c0 = Math.Abs(near - x) < spacing * 0.3 ? near : x;
+                slots.Add(new Slot
+                {
+                    R = new Box(c0 - half, py1 - 4.6 * h, c0 + half, py2 + 0.2 * h),
+                    PriceR = new Box(c0 - half, py1 - 0.2 * h, c0 + half, py2 + 0.2 * h),
+                    D = new Box(c0 - dhalf, py1 - 12.3 * h, c0 + dhalf, py2 + 0.6 * h),
+                });
+            }
+        }
+        return slots;
     }
 
     void CountPage()
     {
         if (slots == null) return;
-        var known = slots.Where(s => s.Card != null).ToList();
+        var known = slots.Where(s => s.Card != null && !s.Card.Sold).ToList();
         if (known.Count < 3) return;
         var sig = slots.Select(s => s.Card == null ? "?" : $"{s.Card.Name}|{s.Card.Qty}|{s.Card.Price}").ToArray();
         var prev = lastSig?.Split('\n');

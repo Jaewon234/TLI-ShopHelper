@@ -30,6 +30,29 @@ sealed class Scene
 
     public Box? Hover;   // 마우스를 올린 카드 (어둡게)
 
+    /// <summary>UI 최대 크기 스크린샷: 6개 + 2개 두 줄, 6번째 칸은 매진.</summary>
+    public static Scene MakeBig(string[][] names, string[] prices)
+    {
+        var s = new Scene();
+        void Put(string text, double cx, double y)
+        {
+            var parts = text.Split(' ');
+            double total = parts.Sum(p => p.Length * 20) + (parts.Length - 1) * 6;
+            double x = cx - total / 2;
+            foreach (var p in parts) { s.Items.Add(new TextItem(p, new Box(x, y, x + p.Length * 20, y + 22))); x += p.Length * 20 + 6; }
+        }
+        for (int i = 0; i < 8; i++)
+        {
+            double cx = 693 + 201 * (i % 6);
+            double off = i < 6 ? 0 : 320;
+            if (names[i].Length == 2) { Put(names[i][0], cx, 312 + off); Put(names[i][1], cx, 342 + off); }
+            else Put(names[i][0], cx, 342 + off);
+            Put(prices[i], cx, 397 + off);
+        }
+        Put("신들의 강복", 220, 28); Put("0", 1696, 30); Put("50", 1660, 902); Put("새로고침", 1646, 958);
+        return s;
+    }
+
     public Frame Render()
     {
         var f = new Frame(1920, 1080);
@@ -162,6 +185,28 @@ static class T
         for (int i = 0; i < 4; i++) { dim.Px[i * 4] = dim.Px[i * 4 + 1] = dim.Px[i * 4 + 2] = vals[i]; }
         var ac = dim.AutoContrast();
         Check(ac.Px[0] < 10 && ac.Px[12] > 245, $"60~90 → {ac.Px[0]}~{ac.Px[12]}");
+
+        Console.WriteLine("[5d] UI 최대 크기: 6+2 두 줄, 매진 칸");
+        string[][] bigNames = {
+            new[]{"이계의 메아리 X","10"}, new[]{"에너지 코어 X","10"}, new[]{"승화의 쐐기(매","직) X 20"}, new[]{"최초의 불꽃","가루 X 60"},
+            new[]{"이계의 메아리 X","20"}, new[]{"최초의 불꽃","결정 X 10"}, new[]{"최초의 불꽃","결정"}, new[]{"신비의 휘석(소)"} };
+        string[] bigPrices = { "66", "77", "13", "12", "107", "매진", "56", "200" };
+        var bocr = new FakeOcr();
+        var btr = new Tracker(bocr, cfg) { Log = m => Console.WriteLine("    log: " + m) };
+        double bt = 0; btr.Reset(bt);
+        var bigScene = Scene.MakeBig(bigNames, bigPrices);
+        Run(btr, bocr, bigScene, ref bt);
+        var bs = btr.Snap();
+        Console.Write(Parser.Describe(bs.Slots.Select(x => x.Card), cfg));
+        Check(bs.Slots.Count == 8, $"8칸 (두 줄) - 실제 {bs.Slots.Count}");
+        Check(bs.Slots.Take(6).All(x => x.R.Y2 < 430) && bs.Slots.Skip(6).All(x => x.R.Y1 > 600), "윗줄 6, 아랫줄 2");
+        Check(bs.Slots[5].Card?.Status == Verdict.Sold, "6번 매진");
+        Check(bs.Slots[6].Card?.Price == 56 && bs.Slots[7].Card?.Price == 200, "아랫줄 가격");
+        Check(bs.Slots.All(x => x.D.X2 - x.D.X1 < 182 && x.R.X2 - x.R.X1 < 182), "비교/표시 범위가 카드 폭(182) 안");
+        Check(Math.Abs(bs.Slots[0].D.Y1 - 125) < 10, $"카드 위쪽 끝 ≈125 - 계산 {bs.Slots[0].D.Y1:0}");
+        bocr.Calls = 0;
+        Run(btr, bocr, bigScene, ref bt, 40);
+        Check(bocr.Calls == 0, $"매진 칸을 다시 읽지 않음 - OCR {bocr.Calls}번");
 
         Console.WriteLine("[6] 시세 모드 변경 후 재평가");
         cfg.Mode = "resell"; tr.Reevaluate();

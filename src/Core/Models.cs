@@ -27,7 +27,7 @@ public sealed class Seg
     public double H;
 }
 
-public enum Verdict { Unknown, Good, Bad }
+public enum Verdict { Unknown, Good, Bad, Sold }
 
 public sealed class Card
 {
@@ -35,6 +35,7 @@ public sealed class Card
     public string Name = "";
     public int Qty;
     public int Price;
+    public bool Sold;      // 매진
     public Box B;          // 이름 + 가격 전체
     public Box PriceBox;   // 가격 줄
     public double H;
