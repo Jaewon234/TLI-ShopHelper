@@ -260,6 +260,11 @@ public static class Parser
         cd.Value = null; cd.Diff = null;
         cd.RangeLo = cd.RangeHi = null;
         if (cd.Sold) { cd.Status = Verdict.Sold; return; }
+        if (cd.Item is { IsGamble: true })
+        {
+            cd.Status = Verdict.Skip;   // 도박(신비의 휘석)은 판정하지 않고 건너뜀
+            return;
+        }
         if (cd.Item is { IsGamble: true } g)
         {
             // 도박: 평균 획득 휘석으로 기대 이득, 최소/최대로 범위 (휘석으로 받으니 수수료 없음)
@@ -311,7 +316,7 @@ public static class Parser
             i++;
             if (c == null) { sb.AppendLine($"{i}. (읽기 실패)"); continue; }
             string nm = c.Item?.Name ?? $"(모름) {c.Name}";
-            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", Verdict.Sold => "매진", Verdict.Gamble => "도박", _ => "시세없음" };
+            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", Verdict.Sold => "매진", Verdict.Gamble => "도박", Verdict.Skip => "건너뜀", _ => "시세없음" };
             sb.AppendLine($"{i}. {nm} x{c.Qty} | 가격 {c.Price} | 가치 {Fmt(c.Value)} | {tag} {Fmt(c.Diff)}   [{c.Raw}]");
             if (c.Status == Verdict.Good) total += c.Diff!.Value;
         }

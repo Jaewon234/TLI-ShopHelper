@@ -527,7 +527,8 @@ sealed class Overlay
             switch (cd.Status)
             {
                 case Verdict.Sold:
-                    break; // 게임이 이미 '매진' 표시
+                case Verdict.Skip:
+                    break; // 매진(게임이 이미 표시) / 도박(판정 안 함)
                 case Verdict.Good:
                     c.Glow(d.X1, d.Y1, d.W, d.H, rr, Green, (int)Math.Max(6, th * 0.5));
                     c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Green, Math.Max(3, th * 0.18));

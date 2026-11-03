@@ -190,7 +190,7 @@ static class T
         foreach (var txt in new[] { "가루X60", "직)X20", "직X20", "X20", "결정", "이계의메아리X", "2OOx", "새로고침" })
             Check(!Parser.IsPrice(txt), $"{txt} 는 가격 아님");
         var gs = new Config(); var gcard = new Card { Name = "신비의휘석(소)", Qty = 1, Price = Parser.PriceValue("2OO") }; Parser.Evaluate(gcard, gs);
-        Check(gcard.Diff == 0, $"신비의 휘석(소) 2OO → 200 → 기대 0 (전에는 +198휘 = +3.56결)");
+        Check(gcard.Price == 200 && gcard.Status == Verdict.Skip, $"신비의 휘석(소) 2OO → 200, 도박은 건너뜀 (전에는 +198휘 = +3.56결)");
 
         Console.WriteLine("[1b] 개수: OCR 이 X 를 놓쳐도");
         foreach (var (lines2, want) in new (string[], int)[] {
@@ -303,7 +303,7 @@ static class T
         foreach (var sl in s6.Slots) Console.WriteLine($"    slot R x {sl.R.X1:0}~{sl.R.X2:0} y {sl.R.Y1:0}~{sl.R.Y2:0}");
         Check(s6.Slots.Count == 8, $"8칸 - 실제 {s6.Slots.Count}");
         Check(s6.Slots.Select(x => x.Card?.Price ?? -1).SequenceEqual(new[] { 48, 74, 6, 12, 534, 165, 71, 500 }), "칸 단위로 다시 읽어 가격 채움");
-        Check(s6.Slots[7].Card?.Item?.Name == "신비의 휘석(대)" && s6.Slots[7].Card?.Status == Verdict.Gamble, "맨 끝 신비의 휘석(대) = 도박");
+        Check(s6.Slots[7].Card?.Item?.Name == "신비의 휘석(대)" && s6.Slots[7].Card?.Status == Verdict.Skip, "맨 끝 신비의 휘석(대) = 도박이라 건너뜀");
 
         Console.WriteLine("[5d3] 매진된 첫 칸(글자 못 읽음) + 가격 6 을 칸 전체로는 못 읽음 (구매 스크린샷)");
         string[][] n7 = {
@@ -349,7 +349,7 @@ static class T
             Run(tr9, ocr9, Scene.Make(n9, p9), ref t9, 30);
             var s9 = tr9.Snap();
             string got = $"가루 x{s9.Slots[5].Card?.Qty}, 신비 {(s9.Slots[7].Card == null ? "읽기 실패" : s9.Slots[7].Card!.Price + "휘")}";
-            if (withEn) Check(s9.Slots[5].Card?.Qty == 60 && s9.Slots[7].Card?.Price == 200 && s9.Slots[7].Card?.Diff == 0, "영어 OCR 있음: " + got);
+            if (withEn) Check(s9.Slots[5].Card?.Qty == 60 && s9.Slots[7].Card?.Price == 200 && s9.Slots[7].Card?.Status == Verdict.Skip, "영어 OCR 있음: " + got);
             else Console.WriteLine("    (영어 OCR 없으면: " + got + ")");
         }
 
@@ -413,12 +413,11 @@ static class T
         var gc = new Config();
         Card G(int price) { var c = new Card { Name = "신비의휘석(소)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }
         var g200 = G(200); var g150 = G(150);
-        Check(g200.Status == Verdict.Gamble && g200.Diff == 0 && g200.RangeLo == -150 && g200.RangeHi == 150, "200휘석: 기대 0, -150~+150");
-        Check(g150.Status == Verdict.Good && g150.Diff == 50, "150휘석: 기대 +50 → 구매");
+        Check(g200.Status == Verdict.Skip && g150.Status == Verdict.Skip, "도박은 가격과 상관없이 판정하지 않음");
 
         Card GL(int price) { var c = new Card { Name = "신비의휘석(대)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }
         var gl = GL(500);
-        Check(gl.Status == Verdict.Gamble && gl.Diff == 0 && gl.RangeLo == -400 && gl.RangeHi == 400, "대 500휘석: 기대 0, -400~+400 (100~900)");
+        Check(gl.Status == Verdict.Skip, "신비의 휘석(대)도 건너뜀");
         var oldG = new Config(); oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMin = null; oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMax = null;
         Check(oldG.Migrate() && oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMax == 900, "예전 prices.json 의 빈 범위를 100~900 으로 채움");
 

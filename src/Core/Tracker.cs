@@ -105,7 +105,7 @@ public sealed class Tracker
         foreach (var s in new[] { slots[rescanIdx++] })
         {
             if (rescanIdx >= slots.Count) rescanIdx = -1;
-            if (s.Card is { Sold: true }) continue;   // 매진 칸은 다시 읽지 않음
+            if (s.Card is { Sold: true } or { Status: Verdict.Skip }) continue;   // 매진·도박 칸은 다시 읽지 않음
             // 이미 읽은 칸은 숫자(가격·개수)만 다시 확인 (이름은 거의 안 틀리고, 숫자만 읽는 게 훨씬 빠름)
             if (s.Card is { Sold: false } cur)
             {

@@ -27,7 +27,7 @@ public sealed class Seg
     public double H;
 }
 
-public enum Verdict { Unknown, Good, Bad, Sold, Gamble }
+public enum Verdict { Unknown, Good, Bad, Sold, Gamble, Skip }   // Skip = 판정하지 않음 (신비의 휘석 도박)
 
 public sealed class Card
 {
@@ -119,7 +119,6 @@ public sealed class Config
         new() { Name = "에너지 코어", Price = 0.04 },
         new() { Name = "절대자 엠버", Price = 20.5 },
         Gamble("소", 50, 350),
-        Gamble("중", null, null),
         Gamble("대", 100, 900),
     };
 
