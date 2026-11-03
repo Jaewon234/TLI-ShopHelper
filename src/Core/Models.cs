@@ -105,6 +105,9 @@ public sealed class Config
     [JsonPropertyName("window_title_contains")] public string WindowTitleContains { get; set; } = "";
     [JsonPropertyName("_items_설명")] public string ItemsNote { get; set; } = "price = 1개당 결정. 모르면 null. kind=gamble 은 gamble_avg(평균 획득 휘석)로 계산";
     [JsonPropertyName("items")] public List<ItemDef> Items { get; set; } = DefaultItems();
+    /// <summary>사용자가 지운 기본 항목 (업데이트 때 다시 추가하지 않음)</summary>
+    [JsonPropertyName("removed_items")] public List<string> RemovedItems { get; set; } = new();
+    public bool IsRemoved(string name) => RemovedItems.Any(n => n.Replace(" ", "") == name.Replace(" ", ""));
 
     [JsonIgnore] public bool Resell => Mode.Equals("resell", StringComparison.OrdinalIgnoreCase);
 
@@ -173,7 +176,7 @@ public sealed class Config
         foreach (var d in DefaultItems().Where(i => i.IsGamble))
         {
             var g = Items.FirstOrDefault(i => i.Name.Replace(" ", "") == d.Name.Replace(" ", ""));
-            if (g == null) { Items.Add(d); changed = true; }
+            if (g == null) { if (!IsRemoved(d.Name)) { Items.Add(d); changed = true; } }
             else
             {
                 if (!g.IsGamble) { g.Kind = d.Kind; g.Taxed = false; g.Price = null; changed = true; }
@@ -185,7 +188,7 @@ public sealed class Config
         if (!Items.Any(i => i.IsCrystal)) { Items.Insert(0, new ItemDef { Name = "최초의 불꽃 결정", Price = 1, Taxed = false }); changed = true; }
         // 새 버전에서 기본 항목이 늘어나면 없는 것만 추가 (입력해 둔 시세는 그대로)
         foreach (var d in DefaultItems())
-            if (!Items.Any(i => i.Name.Replace(" ", "") == d.Name.Replace(" ", ""))) { Items.Add(d); changed = true; }
+            if (!IsRemoved(d.Name) && !Items.Any(i => i.Name.Replace(" ", "") == d.Name.Replace(" ", ""))) { Items.Add(d); changed = true; }
         return changed;
     }
 
@@ -195,7 +198,7 @@ public sealed class Config
     // prices.json  : 시세만 (항목, 결정 환율). 업데이트해도 절대 덮어쓰지 않음.
     // settings.json: 그 밖의 설정 (기준, 업데이트 확인 …).
 
-    static readonly string[] PriceKeys = { "_unit_설명", "price_unit", "crystal_rate", "_items_설명", "items" };
+    static readonly string[] PriceKeys = { "_unit_설명", "price_unit", "crystal_rate", "_items_설명", "items", "removed_items" };
 
     sealed class PricesFile
     {
@@ -204,6 +207,7 @@ public sealed class Config
         [JsonPropertyName("huiseok_price")] public double? HuiseokPrice { get; set; }
         [JsonPropertyName("crystal_rate")] public double CrystalRate { get; set; } = 50;
         [JsonPropertyName("items")] public List<ItemDef> Items { get; set; } = new();
+        [JsonPropertyName("removed_items")] public List<string> RemovedItems { get; set; } = new();
     }
 
     public void SaveSplit(string settingsPath, string pricesPath)
@@ -213,7 +217,7 @@ public sealed class Config
     }
 
     public void SavePrices(string pricesPath) =>
-        WriteAtomic(pricesPath, JsonSerializer.Serialize(new PricesFile { PriceUnit = PriceUnit, HuiseokPrice = HuiseokPrice, CrystalRate = CrystalRate, Items = Items }, Opts));
+        WriteAtomic(pricesPath, JsonSerializer.Serialize(new PricesFile { PriceUnit = PriceUnit, HuiseokPrice = HuiseokPrice, CrystalRate = CrystalRate, Items = Items, RemovedItems = RemovedItems }, Opts));
 
     public void SaveSettings(string settingsPath)
     {
@@ -254,7 +258,7 @@ public sealed class Config
             var pf = JsonSerializer.Deserialize<PricesFile>(json, Opts) ?? new PricesFile();
             using (var doc = JsonDocument.Parse(json, docOpts))
                 if (!doc.RootElement.TryGetProperty("price_unit", out _)) pf.PriceUnit = "";
-            cfg.PriceUnit = pf.PriceUnit; cfg.CrystalRate = pf.CrystalRate; cfg.Items = pf.Items;
+            cfg.PriceUnit = pf.PriceUnit; cfg.CrystalRate = pf.CrystalRate; cfg.Items = pf.Items; cfg.RemovedItems = pf.RemovedItems ?? new();
             if (pf.HuiseokPrice is double hp && hp > 0) cfg.HuiseokPrice = hp;   // 입력한 값 그대로 (0.018)
         }
         else changed = true;

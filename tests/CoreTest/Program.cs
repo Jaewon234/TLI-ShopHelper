@@ -468,6 +468,12 @@ static class T
         Check(ec.Value == Math.Ceiling(Math.Round(0.04 / 0.017 * 20 * 0.875, 6)), $"계산에 반영 (코어 20개 결정화 = {ec.Value}휘)");
         Directory.Delete(hdir, true);
 
+        Console.WriteLine("[10c] 지운 기본 항목은 업데이트해도 되살아나지 않음");
+        var rc = new Config(); rc.Items.RemoveAll(i => i.Name == "절대자 엠버"); rc.RemovedItems.Add("절대자 엠버");
+        Check(!rc.Migrate() && !rc.Items.Any(i => i.Name == "절대자 엠버"), "엠버 지운 채로 유지");
+        rc.RemovedItems.Clear();
+        Check(rc.Migrate() && rc.Items.Any(i => i.Name == "절대자 엠버"), "지운 기록을 없애면 다시 기본 항목으로");
+
         Console.WriteLine("[11] 시세(prices.json) / 설정(settings.json) 분리");
         var dir = Path.Combine(Path.GetTempPath(), "shophelper_split_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);

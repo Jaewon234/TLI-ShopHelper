@@ -47,7 +47,10 @@ static class Updater
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var root = doc.RootElement;
         string tag = root.GetProperty("tag_name").GetString() ?? "";
-        var ver = Version.Parse(tag.TrimStart('v', 'V'));
+        // 태그에서 숫자 부분만 (v1.6.15, v.1.6.15, 1.6.15 모두 됨)
+        var vm = System.Text.RegularExpressions.Regex.Match(tag, @"\d+(\.\d+){1,3}");
+        if (!vm.Success) throw new InvalidOperationException($"릴리스 태그 '{tag}' 에서 버전 번호를 못 찾음");
+        var ver = Version.Parse(vm.Value);
         string page = root.TryGetProperty("html_url", out var hu) ? hu.GetString() ?? "" : "";
         // 첨부 파일: 이름이 정확히 ShopHelper.zip 인 것, 없으면 zip 이 하나뿐일 때 그것 (이름 오타 대비)
         var zips = root.GetProperty("assets").EnumerateArray()

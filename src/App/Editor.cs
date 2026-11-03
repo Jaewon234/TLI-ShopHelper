@@ -36,7 +36,11 @@ sealed class Editor
     public IntPtr Hwnd { get; private set; }
     public bool ShopMode { get; private set; }
     IntPtr font, fieldBrush;
-    sealed class Row { public string Label = ""; public IntPtr NameEdit, PriceEdit; public ItemDef? Orig; public int Y; }
+    sealed class Row { public string Label = ""; public IntPtr NameEdit, PriceEdit; public ItemDef? Orig; public int Y; public bool Deleted; }
+
+    /// <summary>이름 오른쪽 ✕ (지우기) / ↺ (되돌리기). 적용을 눌러야 실제로 지워짐</summary>
+    (int x, int y, int w, int h) DelRect(Row r) => (S(170), S(r.Y) + (S(FieldH) - S(18)) / 2, S(18), S(18));
+    bool HasName(Row r) => RowName(r).Length > 0 || r.Deleted;
     readonly List<Row> rows = new();
     IntPtr rateEdit;
     bool loading, dirty;
@@ -305,20 +309,24 @@ sealed class Editor
     void AddRow(string name, string price, ItemDef? orig, int i, bool editableName, ref int y)
     {
         var r = new Row { Label = name, Orig = orig, Y = y };
-        if (editableName) r.NameEdit = FieldEdit(name, S(18), S(y), ID_NAME + i, S(166));
-        r.PriceEdit = FieldEdit(price, S(FieldX), S(y), ID_PRICE + i);
+        if (editableName) r.NameEdit = FieldEdit(name, S(18), S(y), ID_NAME + i, S(148), NameCue);   // 오른쪽에 ✕ 자리
+        r.PriceEdit = FieldEdit(price, S(FieldX), S(y), ID_PRICE + i, 0, PriceCue);
         rows.Add(r);
         y += RowH;
     }
 
     /// <summary>테두리 없는 EDIT 를 칸 배경 안쪽에 넣음 (배경은 WM_PAINT 에서 그림).</summary>
-    IntPtr FieldEdit(string text, int x, int y, int id, int w = 0)
+    const string NameCue = "아이템 이름 똑같이", PriceCue = "시세 없음";
+
+    IntPtr FieldEdit(string text, int x, int y, int id, int w = 0, string? cue = null)
     {
         if (w == 0) w = S(FieldW);
         int eh = S(20);
         var e = CreateWindowExW(0, "EDIT", text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
             x + S(10), y + (S(FieldH) - eh) / 2, w - S(20), eh, Hwnd, new IntPtr(id), IntPtr.Zero, IntPtr.Zero);
         SendMessageW(e, WM_SETFONT, font, new IntPtr(1));
+        // 비어 있으면 회색 안내 문구, 한 글자라도 입력하면 사라짐 (EM_SETCUEBANNER, 입력 중에도 표시)
+        if (cue != null) SendMessageStr(e, 0x1501, new IntPtr(1), cue);
         return e;
     }
 
@@ -379,12 +387,32 @@ sealed class Editor
             int y = S(r.Y);
             if (r.NameEdit != IntPtr.Zero)
             {
-                c.FillRound(S(18), y, S(166), S(FieldH), S(8), Field);
-                if (Text(r.NameEdit).Length == 0) c.Text(S(28), y + S(6), "새 항목 이름", S(14), false, Dim);
+                c.FillRound(S(18), y, S(148), S(FieldH), S(8), Field);
+                if (withTexts && Text(r.NameEdit).Length == 0) c.Text(S(28), y + S(6), NameCue, S(15), false, Dim);   // 화면 저장용 (평소엔 입력칸이 직접 보여줌)
             }
-            else c.Text(S(20), y + S(6), r.Label, S(15), false, Txt);
+            else c.Text(S(20), y + S(6), r.Label, S(15), false, r.Deleted ? Dim : Txt);
+            if (HasName(r))
+            {
+                var (dx, dy, dw, dh) = DelRect(r);
+                if (r.Deleted)
+                {
+                    c.Line(S(20), y + S(FieldH) / 2.0, S(166), y + S(FieldH) / 2.0, Warn, 1.4);   // 취소선
+                    c.Text(dx + S(2), dy - S(1), "↺", S(14), true, Gold);
+                }
+                else
+                {
+                    c.Line(dx + S(4), dy + S(4), dx + dw - S(4), dy + dh - S(4), Dim, 1.5);
+                    c.Line(dx + dw - S(4), dy + S(4), dx + S(4), dy + dh - S(4), Dim, 1.5);
+                }
+            }
+            if (r.Deleted)
+            {
+                if (r.NameEdit != IntPtr.Zero) c.Text(S(28), y + S(6), Text(r.NameEdit), S(15), false, Dim);
+                c.Text(S(FieldX) + S(10), y + S(6), "지움 (적용 시)", S(13), false, Warn);
+                continue;
+            }
             string pt = Text(r.PriceEdit);
-            FieldBg(c, S(FieldX), y, S(FieldW), pt, false);
+            FieldBg(c, S(FieldX), y, S(FieldW), withTexts ? pt : "x", false);   // 평소엔 안내 문구를 입력칸이 직접 보여줌
             string res = "";
             uint rc = Dim;
             if (!PriceInput.TryParse(pt, rate, out var v)) { res = "형식 오류"; rc = Warn; }
@@ -438,7 +466,7 @@ sealed class Editor
     {
         c.FillRound(x, y, w, S(FieldH), S(8), Field);
         if (accent) c.StrokeRound(x + 0.5, y + 0.5, w - 1, S(FieldH) - 1, S(8), Canvas.Argb(90, 234, 179, 8), 1);
-        if (text.Length == 0 && !accent) c.Text(x + S(10), y + S(6), "시세 없음", S(14), false, Dim);
+        if (text.Length == 0 && !accent) c.Text(x + S(10), y + S(6), PriceCue, S(15), false, Dim);
     }
 
     // ---------------- 적용 ----------------
@@ -457,7 +485,15 @@ sealed class Editor
         foreach (var r in rows)
         {
             string name = RowName(r);
+            if (r.Deleted)
+            {
+                // 지운 항목: 목록에서 빼고, 기본 항목이면 업데이트 때 되살아나지 않게 기억
+                string nm = r.Orig?.Name ?? name;
+                if (nm.Length > 0 && !cfg.IsRemoved(nm)) cfg.RemovedItems.Add(nm);
+                continue;
+            }
             if (name.Length == 0) continue;
+            cfg.RemovedItems.RemoveAll(n => n.Replace(" ", "") == name.Replace(" ", ""));   // 지웠던 이름을 다시 넣으면 되살림
             if (!PriceInput.TryParse(Text(r.PriceEdit), rate, out var v))
             {
                 errors.Add(name);
@@ -537,6 +573,17 @@ sealed class Editor
                     App.Log($"자동 읽기: {cfg.RereadSec:0.0}초마다");
                     return IntPtr.Zero;
                 }
+                foreach (var r in rows)
+                    if (HasName(r) && In(DelRect(r), x, y))
+                    {
+                        r.Deleted = !r.Deleted;
+                        ShowWindow(r.PriceEdit, r.Deleted ? SW_HIDE : SW_SHOW);
+                        if (r.NameEdit != IntPtr.Zero) ShowWindow(r.NameEdit, r.Deleted ? SW_HIDE : SW_SHOW);
+                        dirty = true;
+                        status = ShopMode ? "지울 항목 표시됨 · [적용] 하면 지워짐" : "지울 항목 표시됨 · [입력완료] 하면 지워짐";
+                        InvalidateRect(Hwnd, IntPtr.Zero, false);
+                        return IntPtr.Zero;
+                    }
                 if (In(ButtonRect, x, y)) Apply();
                 else if (In(CloseRect, x, y)) { if (ShopMode) Collapse(); else Destroy(); }   // ✕ = 바꾼 값 버리고 접기/닫기
                 return IntPtr.Zero;
