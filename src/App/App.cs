@@ -8,19 +8,46 @@ static class App
 {
     public static readonly string Dir = AppContext.BaseDirectory;
     /// <summary>
-    /// 시세 설정은 프로그램 폴더 밖(%AppData%\ShopHelper)에 저장.
-    /// 새 버전 zip 을 같은 폴더에 풀어도 입력한 시세가 덮어써지지 않음.
+    /// 시세·설정은 ShopHelper.exe 와 같은 폴더에 저장 (폴더째 다른 PC 로 옮기면 시세도 같이 감).
+    /// 자동 업데이트는 exe 와 안내 파일만 바꾸고 prices.json / settings.json 은 건드리지 않음.
+    /// 폴더에 쓸 수 없을 때만 (예: Program Files) 예전처럼 %AppData%\ShopHelper 에 저장.
     /// </summary>
-    public static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopHelper");
+    public static readonly string OldDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopHelper");
+    public static readonly string DataDir = CanWrite(Dir) ? Dir : OldDataDir;
     /// <summary>시세만 (업데이트해도 절대 바뀌지 않음)</summary>
     public static readonly string PricesPath = Path.Combine(DataDir, "prices.json");
     /// <summary>그 밖의 설정</summary>
     public static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
-    static readonly string[] LegacyConfigs = { Path.Combine(DataDir, "config.json"), Path.Combine(Dir, "config.json") };
+    static readonly string[] LegacyConfigs = { Path.Combine(Dir, "config.json"), Path.Combine(OldDataDir, "config.json") };
+    /// <summary>업데이트가 덮어쓰면 안 되는 파일 (사용자 데이터)</summary>
+    public static readonly string[] UserFiles = { "prices.json", "settings.json", "config.json", "helper.log" };
+
+    static bool CanWrite(string dir)
+    {
+        try
+        {
+            var probe = Path.Combine(dir, ".write_test_" + Environment.ProcessId);
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch { return false; }
+    }
 
     public static Config LoadConfig()
     {
         Directory.CreateDirectory(DataDir);
+        // 예전 버전(%AppData%\ShopHelper)에 저장된 시세를 exe 폴더로 옮겨 옴 (원본은 백업으로 남김)
+        if (!string.Equals(Path.GetFullPath(DataDir).TrimEnd('\\', '/'), Path.GetFullPath(OldDataDir).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
+            && !File.Exists(PricesPath))
+        {
+            foreach (var name in new[] { "prices.json", "settings.json" })
+            {
+                var from = Path.Combine(OldDataDir, name);
+                try { if (File.Exists(from)) { File.Copy(from, Path.Combine(DataDir, name)); Log($"예전 {name} 을 exe 폴더로 옮겨 옴: {from}"); } }
+                catch (Exception e) { Log($"{name} 옮기기 실패: " + e.Message); }
+            }
+        }
         var c = Config.LoadSplit(SettingsPath, PricesPath, LegacyConfigs);
         ConfigSaved();
         return c;
@@ -57,7 +84,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.5";
+    public const string Version = "1.7.6";
 
     [STAThread]
     static int Main(string[] args)

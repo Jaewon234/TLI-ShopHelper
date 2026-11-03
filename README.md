@@ -35,7 +35,7 @@ dotnet publish src/App/ShopHelper.csproj -c Release -o out
 ```
 Linux에서도 Windows용 exe를 빌드할 수 있습니다 (`EnableWindowsTargeting`, WinForms/WPF 미사용).
 
-## 설정 (`%AppData%\ShopHelper\`)
+## 설정 (ShopHelper.exe 와 같은 폴더, 쓸 수 없으면 `%AppData%\ShopHelper\`)
 - `prices.json`: 시세만 (1개당 결정, `huiseok_price` = 신력의 휘석 1개가 몇 결정). 업데이트로 절대 덮어쓰지 않고, 새 기본 항목은 없는 것만 추가
 - `settings.json`: 그 밖의 설정 (`mode`, `check_updates`, `update_repo` …)
 - 배포 zip 에는 설정 파일을 넣지 않음. 예전 `config.json` 은 처음 실행 때 두 파일로 나눠 옮김

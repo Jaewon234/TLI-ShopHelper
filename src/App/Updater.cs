@@ -12,7 +12,7 @@ namespace ShopHelper;
 ///  2) 새 버전이면 알림 → 누르면 ShopHelper.zip 을 받아 GitHub 이 알려주는 SHA-256 으로 확인 후 압축 해제
 ///  3) 새 버전을 "--install-update 설치폴더 pid" 로 실행하고 지금 버전은 종료
 ///  4) 새 버전이 이전 버전 종료를 기다렸다가 설치 폴더에 자기를 복사하고 그 자리에서 다시 시작
-/// 시세(prices.json)와 설정은 %AppData%\ShopHelper 에 있어서 그대로 남음.
+/// 시세(prices.json)와 설정(settings.json)은 덮어쓰지 않아서 그대로 남음 (App.UserFiles).
 /// </summary>
 static class Updater
 {
@@ -130,7 +130,8 @@ static class Updater
             foreach (var file in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
             {
                 string rel = Path.GetRelativePath(src, file);
-                if (rel.Equals("helper.log", StringComparison.OrdinalIgnoreCase)) continue;
+                // 사용자 데이터(시세·설정·로그)는 절대 덮어쓰지 않음
+                if (App.UserFiles.Any(u => rel.Equals(u, StringComparison.OrdinalIgnoreCase))) continue;
                 string dst = Path.Combine(target, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
                 for (int attempt = 0; ; attempt++)
