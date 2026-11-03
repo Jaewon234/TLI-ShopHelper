@@ -173,6 +173,7 @@ sealed class Engine
         lock (popups) popups.Clear();
         App.Log(open ? "상점 열림" : "상점 닫힘");
         shopOpen = open;
+        overlay.ShopOpen = open;
         if (open) openedNow = true;
         wake.Set();
     }
@@ -197,7 +198,15 @@ sealed class Engine
 
     static readonly uint MyPid = (uint)Environment.ProcessId;
     /// <summary>앞에 있는 창이 이 프로그램 자신의 창인지 (트레이 메뉴, 시세 창, 버튼 …)</summary>
-    static bool IsOurWindow(IntPtr w) { GetWindowThreadProcessId(w, out uint pid); return pid == MyPid; }
+    static bool IsOurWindow(IntPtr w)
+    {
+        GetWindowThreadProcessId(w, out uint pid);
+        if (pid == MyPid) return true;
+        // 트레이 아이콘을 누르면 작업 표시줄이 먼저 앞으로 옴 → 게임에서 떠난 게 아님
+        var sb = new System.Text.StringBuilder(64);
+        GetClassNameW(w, sb, 64);
+        return sb.ToString() is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland";
+    }
 
     void Run()
     {

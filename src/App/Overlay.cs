@@ -9,7 +9,7 @@ namespace ShopHelper;
 /// </summary>
 sealed class Overlay
 {
-    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5, MSG_INSTALL = WM_APP + 6;
+    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5, MSG_INSTALL = WM_APP + 6, MSG_SAVE = WM_APP + 7;
     // 색 (ARGB)
     static readonly uint Green = Canvas.Argb(255, 34, 197, 94), Red = Canvas.Argb(255, 239, 68, 68),
         Amber = Canvas.Argb(255, 245, 158, 11), Muted = Canvas.Argb(255, 150, 155, 165), Dim = Canvas.Argb(255, 110, 115, 125),
@@ -22,6 +22,8 @@ sealed class Overlay
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     volatile Updater.Release? update;
     public string? UpdatedFrom, UpdatedTag;
+    /// <summary>상점이 열려 있는지 (엔진이 알려줌). 화면 저장 때 오버레이가 잠깐 숨겨져 있어도 그리기 위해</summary>
+    public volatile bool ShopOpen;
     volatile bool popupOpen;
     /// <summary>상점 안 다른 창(구매 창 등)이 열렸는지. 바뀌었으면 true.</summary>
     public bool SetPopup(bool open) { if (popupOpen == open) return false; popupOpen = open; return true; }
@@ -222,7 +224,7 @@ sealed class Overlay
         {
             case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
-            case 11: SaveAsSeen(); break;
+            case 11: SaveAsSeenLater(); break;   // 메뉴가 완전히 사라진 뒤에 찍음
             case 8: if (update != null) StartInstall(); else new Thread(() => CheckUpdate(manual: true)) { IsBackground = true }.Start(); break;
             case 10: cfg.CheckUpdates = !cfg.CheckUpdates; try { App.SaveSettings(cfg); } catch { } break;
             case 9: PostQuitMessage(0); break;
@@ -307,6 +309,9 @@ sealed class Overlay
     /// 지금 화면 그대로 저장: 게임 화면 + 오버레이 + 시세 창을 직접 합쳐서 PNG 로.
     /// (오버레이와 시세 창은 OCR 에 섞이지 않게 화면 캡처에서 빠져 있어서, 일반 캡처 도구로는 안 찍힘)
     /// </summary>
+    void SaveAsSeenLater() =>
+        new Thread(() => { Thread.Sleep(250); PostMessageW(msgWnd, MSG_SAVE, IntPtr.Zero, IntPtr.Zero); }) { IsBackground = true }.Start();
+
     void SaveAsSeen()
     {
         try
@@ -324,7 +329,7 @@ sealed class Overlay
             var outF = new Frame((byte[])f.Px.Clone(), f.W, f.H);
             // 1) 오버레이 (미리 곱한 알파로 겹치기)
             Snapshot? sn; lock (gate) sn = snap;
-            if (vis && sn != null && r.W > 0)
+            if ((vis || ShopOpen) && sn != null && r.W > 0)
             {
                 // 지금 보이는 결과를 다시 그려서 합침 (상점을 닫은 뒤의 예전 결과는 그리지 않음)
                 var ov = new byte[r.W * r.H * 4];
@@ -408,6 +413,9 @@ sealed class Overlay
             {
                 case 0x312: // WM_HOTKEY
                     if (w.ToInt64() == 2) SaveAsSeen(); else OpenEditor();
+                    return IntPtr.Zero;
+                case MSG_SAVE:
+                    SaveAsSeen();
                     return IntPtr.Zero;
                 case MSG_UPDATE:
                     (int X, int Y, int W, int H) r;
