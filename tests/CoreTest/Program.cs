@@ -84,12 +84,14 @@ sealed class FakeOcr : IOcr
     public Scene Scene = new();
     public int Calls;
     public bool Fail;   // 툴팁 등으로 글자를 못 읽는 상황
+    public HashSet<string> MissInFullScan = new();   // 전체 화면 OCR 에서만 놓치는 글자 (칸 단위로는 읽힘)
     public int MaxDim => 10000;
     public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
     {
         Calls++;
         if (Fail) return new();
-        var words = Scene.Items.Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
+        bool full = src.W > 1000;
+        var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
             .Select(t => new OcrWord(t.Text, (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
         // Windows OCR 처럼 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
         return words.GroupBy(w => Math.Round(w.Y)).Select(g => g.OrderBy(w => w.X).ToList()).ToList();
@@ -229,6 +231,22 @@ static class T
         bocr.Calls = 0;
         Run(btr, bocr, bigScene, ref bt, 40);
         Check(bocr.Calls == 0, $"매진 칸을 다시 읽지 않음 - OCR {bocr.Calls}번");
+
+        Console.WriteLine("[5d2] 전체 OCR 이 가격을 놓쳐도 (534, 165, 맨 끝 500)");
+        string[][] n6 = {
+            new[]{"최초의 불꽃","결정"}, new[]{"에너지 코어 X","10"}, new[]{"최초의 불꽃","가루 X 60"}, new[]{"승화의 쐐기(매","직) X 20"},
+            new[]{"이계의 메아리 X","100"}, new[]{"에너지 코어 X","20"}, new[]{"이계의 메아리 X","10"}, new[]{"신비의 휘석(대)"} };
+        string[] p6 = { "48", "74", "6", "12", "534", "165", "71", "500" };
+        var ocr6 = new FakeOcr { MissInFullScan = new() { "534", "165", "500" } };
+        var tr6 = new Tracker(ocr6, cfg) { Log = m => Console.WriteLine("    log: " + m) };
+        double t6 = 0; tr6.Reset(t6);
+        Run(tr6, ocr6, Scene.Make(n6, p6), ref t6, 30);
+        var s6 = tr6.Snap();
+        Console.Write(Parser.Describe(s6.Slots.Select(x => x.Card), cfg));
+        foreach (var sl in s6.Slots) Console.WriteLine($"    slot R x {sl.R.X1:0}~{sl.R.X2:0} y {sl.R.Y1:0}~{sl.R.Y2:0}");
+        Check(s6.Slots.Count == 8, $"8칸 - 실제 {s6.Slots.Count}");
+        Check(s6.Slots.Select(x => x.Card?.Price ?? -1).SequenceEqual(new[] { 48, 74, 6, 12, 534, 165, 71, 500 }), "칸 단위로 다시 읽어 가격 채움");
+        Check(s6.Slots[7].Card?.Item?.Name == "신비의 휘석(대)" && s6.Slots[7].Card?.Status == Verdict.Gamble, "맨 끝 신비의 휘석(대) = 도박");
 
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);

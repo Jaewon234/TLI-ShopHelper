@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.6.5";
+    public const string Version = "1.6.6";
 
     [STAThread]
     static int Main(string[] args)
@@ -300,32 +300,55 @@ sealed class Engine
 /// <summary>스크린샷 한 장으로 인식 결과를 확인 (txt + 칸 표시 png).</summary>
 static class Diagnose
 {
+    /// <summary>
+    /// 스크린샷 한 장으로 인식 결과를 확인 (txt + 칸 표시 png).
+    /// 실제 오버레이와 같은 과정(처음 전체 읽기 → 못 읽은 칸은 칸 단위로 다시 읽기)을 거침.
+    /// </summary>
     public static string Run(Frame f, IOcr ocr, Config cfg, string outBase)
     {
+        var sb = new System.Text.StringBuilder();
+        var log = new List<string>();
         var sw = Stopwatch.StartNew();
+        var tracker = new Tracker(ocr, cfg) { Log = log.Add };
+        tracker.Reset(0, 0);
+        double t = 0;
+        for (int i = 0; i < 60; i++, t += 50)
+        {
+            tracker.Update(f, t);
+            var sn = tracker.Snap();
+            if (sn.Slots.Count > 0 && sn.Slots.All(x => !x.Pending) && i > 2) break;
+        }
+        var snap = tracker.Snap();
+        long ms = sw.ElapsedMilliseconds;
+
+        sb.AppendLine($"ShopHelper v{App.Version} · 이미지 {f.W}x{f.H} · 처리 {ms}ms · 신력의 휘석 1개 = {Parser.FmtPrice(cfg.HuiseokPrice)}결");
+        sb.Append(Parser.Describe(snap.Slots.Select(x => x.Card), cfg));
+        sb.AppendLine(snap.Refresh != null ? "새로고침 버튼: 찾음" : "새로고침 버튼: 못 찾음");
+        if (snap.Status.Length > 0) sb.AppendLine("상태: " + snap.Status);
+        sb.AppendLine("--- 처리 기록 ---");
+        foreach (var l in log) sb.AppendLine(l);
+
+        // 참고용: 화면 전체 OCR 원문
         int top = (int)(f.H * cfg.ScanRegion.Top), bottom = (int)(f.H * cfg.ScanRegion.Bottom);
         var crop = f.Crop(0, top, f.W, Math.Max(1, bottom - top));
         double sc = Math.Min(cfg.OcrScale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
         var lines = ocr.Recognize(crop.Scale(sc), new Box(0, top, f.W, bottom), sc);
-        foreach (var ws in lines) foreach (var w in ws) { w.X /= sc; w.Y = w.Y / sc + top; w.W /= sc; w.H /= sc; }
-        long ms = sw.ElapsedMilliseconds;
-        var (cards, refresh) = Parser.Analyze(lines, cfg);
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"이미지 {f.W}x{f.H} · 전체 OCR {ms}ms (확대 {sc:0.##}배)");
-        sb.AppendLine("--- OCR 원문 ---");
+        sb.AppendLine("--- 화면 전체 OCR 원문 ---");
         foreach (var ws in lines) sb.AppendLine(string.Join(" | ", ws.Select(w => w.Text)));
-        sb.Append(Parser.Describe(cards, cfg));
-        sb.AppendLine(refresh != null ? "새로고침 버튼: 찾음" : "새로고침 버튼: 못 찾음");
         File.WriteAllText(outBase + ".txt", sb.ToString());
+
+        // 칸 표시 그림: 카드 전체 테두리 (초록=이득, 빨강=손해, 노랑=도박, 회색=시세 없음/못 읽음)
         var img = new Frame((byte[])f.Px.Clone(), f.W, f.H);
-        foreach (var c in cards)
+        foreach (var sl in snap.Slots)
         {
-            var b = new Box(c.B.X1 - 6, c.B.Y1 - 6, c.B.X2 + 6, c.B.Y2 + 6);
-            switch (c.Status)
+            var b = sl.D;
+            switch (sl.Card?.Status)
             {
-                case Verdict.Good: img.DrawRect(b, 46, 204, 113); break;
-                case Verdict.Bad: img.DrawRect(b, 231, 76, 60); break;
-                default: img.DrawRect(b, 149, 165, 166); break;
+                case Verdict.Good: img.DrawRect(b, 46, 204, 113, 4); break;
+                case Verdict.Bad: img.DrawRect(b, 231, 76, 60, 2); break;
+                case Verdict.Gamble: img.DrawRect(b, 245, 158, 11, 3); break;
+                case Verdict.Sold: img.DrawRect(b, 90, 90, 90, 1); break;
+                default: img.DrawRect(b, 149, 165, 166, 2); break;
             }
         }
         ImageFile.SavePng(img, outBase + ".png");

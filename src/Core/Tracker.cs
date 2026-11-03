@@ -236,7 +236,7 @@ public sealed class Tracker
             return;
         }
         foreach (var c in cards) Parser.Evaluate(c, cfg);
-        slots = BuildSlots(cards);
+        slots = BuildSlots(cards, segs);
         refresh = rf?.B;
         foreach (var s in slots)
         {
@@ -260,7 +260,7 @@ public sealed class Tracker
         return a.Length == 0 ? 0 : a[a.Length / 2];
     }
 
-    static List<Slot> BuildSlots(List<Card> cards)
+    static List<Slot> BuildSlots(List<Card> cards, List<Seg>? segs = null)
     {
         double h = Median(cards.Select(c => c.H));
         // 줄별로 묶기 (UI 크기에 따라 8개 한 줄, 6+2 두 줄 등)
@@ -278,6 +278,14 @@ public sealed class Tracker
             for (int i = 1; i < xs.Count; i++) spacing = Math.Min(spacing, xs[i] - xs[i - 1]);
         }
         if (spacing == double.MaxValue || spacing < 3 * h) spacing = cards.Max(c => c.B.W) * 1.15;
+        else
+        {
+            // 간격을 줄 전체 길이로 다시 계산 (가까운 두 칸만 보면 1px 오차가 칸마다 쌓임)
+            var wide = rows.OrderByDescending(r => r.Max(c => c.B.Cx) - r.Min(c => c.B.Cx)).First();
+            double span = wide.Max(c => c.B.Cx) - wide.Min(c => c.B.Cx);
+            int steps = (int)Math.Round(span / spacing);
+            if (steps > 0) spacing = span / steps;
+        }
         // 비교 범위는 카드 안쪽만 (카드 폭 = 간격의 83~90%). 카드 밖 배경이 섞이면
         // 마우스를 올려 카드만 어두워질 때 '바뀐 것'으로 잘못 잡힘.
         double half = spacing * 0.40;
@@ -288,8 +296,18 @@ public sealed class Tracker
             double py1 = Median(r.Select(c => c.PriceBox.Y1));
             double py2 = Median(r.Select(c => c.PriceBox.Y2));
             var cx = r.Select(c => c.B.Cx).OrderBy(x => x).ToList();
+            // 줄 양 끝: 가격을 못 읽었어도 그 자리에 상품 이름 글자가 있으면 칸을 늘림
+            // (예: 맨 오른쪽 신비의 휘석(대) 가격 500 을 OCR 이 놓친 경우)
+            double nameTop = py1 - 4.6 * h, nameBot = py1;
+            bool HasName(double x) => segs != null && segs.Any(sg =>
+                System.Text.RegularExpressions.Regex.IsMatch(sg.Text, "[가-힣]") &&
+                Math.Abs(sg.B.Cx - x) < spacing * 0.35 && sg.B.Y1 >= nameTop - h && sg.B.Y2 <= nameBot + h &&
+                Math.Abs(sg.H - h) < h * 0.4);
+            double first = cx[0], last = cx[^1];
+            for (int k = 0; k < 8 && HasName(first - spacing); k++) first -= spacing;
+            for (int k = 0; k < 8 && HasName(last + spacing); k++) last += spacing;
             // 줄 안의 빈 칸(못 읽은 칸)도 일정한 간격으로 채움
-            for (double x = cx[0]; x <= cx[^1] + spacing * 0.5; x += spacing)
+            for (double x = first; x <= last + spacing * 0.5; x += spacing)
             {
                 double near = cx.OrderBy(c => Math.Abs(c - x)).First();
                 double c0 = Math.Abs(near - x) < spacing * 0.3 ? near : x;
