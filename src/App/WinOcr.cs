@@ -34,7 +34,8 @@ sealed class WinOcr : IOcr
     {
         var buf = CryptographicBuffer.CreateFromByteArray(img.Px);
         using var bmp = SoftwareBitmap.CreateCopyFromBuffer(buf, BitmapPixelFormat.Bgra8, img.W, img.H, BitmapAlphaMode.Ignore);
-        var res = engine.RecognizeAsync(bmp).AsTask().GetAwaiter().GetResult();
+        OcrResult res;
+        lock (engine) res = engine.RecognizeAsync(bmp).AsTask().GetAwaiter().GetResult();   // 같은 엔진을 동시에 부르지 않게 (자동 읽기 동시 실행)
         var lines = new List<List<OcrWord>>();
         foreach (var line in res.Lines)
         {

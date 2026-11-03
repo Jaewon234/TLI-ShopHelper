@@ -4,8 +4,9 @@ using System.Text.RegularExpressions;
 namespace ShopHelper;
 
 /// <summary>
-/// 시세 입력 해석. 결과는 1개당 결정.
+/// 시세 입력 해석. 결과는 1개당 결정. (입력칸은 숫자와 소수점만 받음 · 아래 나머지 형식은 예전 파일 호환용)
 ///   0.11     → 0.11
+///   0.000, 0., . → 0
 ///   1/20     → 0.05    (20개에 1결정)
 ///   5.5휘    → 0.11    (휘석으로 입력, 결정 1개 = rate 휘석)
 ///   40휘/20  → 0.04    (20개에 40휘석)
@@ -13,6 +14,7 @@ namespace ShopHelper;
 /// </summary>
 public static class PriceInput
 {
+    static readonly Regex NumOnly = new(@"^[0-9]*\.?[0-9]*$", RegexOptions.Compiled);
     static readonly Regex Re = new(@"^([0-9]*\.?[0-9]+)\s*(결정?|휘석?)?\s*(?:/\s*([0-9]*\.?[0-9]+)\s*(개)?)?$", RegexOptions.Compiled);
 
     public static bool TryParse(string? text, double rate, out double? value)
@@ -20,6 +22,14 @@ public static class PriceInput
         value = null;
         var t = (text ?? "").Trim().Replace(",", "");
         if (t.Length == 0) return true;
+        // 숫자와 소수점만 (입력칸에서 이것만 받음): "0.000", "0.", ".", "00" → 0, ".5" → 0.5
+        if (NumOnly.IsMatch(t))
+        {
+            value = t.Any(char.IsAsciiDigit)
+                ? Math.Round(double.Parse(t.EndsWith('.') ? t + "0" : t.StartsWith('.') ? "0" + t : t, CultureInfo.InvariantCulture), 8)
+                : 0;
+            return true;
+        }
         var m = Re.Match(t);
         if (!m.Success) return false;
         double v = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);

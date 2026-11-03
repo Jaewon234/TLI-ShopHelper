@@ -69,6 +69,8 @@ public sealed class Tracker
     public double? LastLatencyMs { get; private set; }
     public string Status { get; private set; } = "";
     public Action<string>? Log;
+    /// <summary>OCR 을 여러 스레드에서 동시에 불러도 되면 true. 그리고 설정 parallel_reread 가 켜져 있으면 자동 읽기 때 모든 칸을 동시에 읽음 (CPU 를 더 쓰는 대신 한 바퀴가 빠름).</summary>
+    public bool ParallelReread;
     /// <summary>
     /// 글자를 읽을 때만 쓰는 '깨끗한' 화면 (오버레이가 안 찍힌 것). null 이면 감시용 화면을 그대로 씀.
     /// 감시(지문 비교)는 매 프레임 빠른 캡처로, 이건 새로고침 때 한 번 정도만 불림.
@@ -86,6 +88,8 @@ public sealed class Tracker
 
     public const double StableMs = 40, MaxWaitMs = 400, RetryMs = 500;
     double lastRescan;
+    System.Threading.Tasks.Task<List<(Slot slot, Card card, List<List<OcrWord>>?)>>? bg;   // 뒤에서 도는 동시 읽기
+    List<Slot>? bgSlots;
     int rescanIdx = -1;   // 이번 바퀴에서 다음에 읽을 칸 (-1 = 쉬는 중)
 
     /// <summary>
@@ -95,23 +99,65 @@ public sealed class Tracker
     bool Rescan(Frame f, double now)
     {
         if (slots == null || cfg.RereadSec <= 0) { rescanIdx = -1; return false; }
-        if (slots.Any(s => s.Pending)) return false;   // 새로고침 처리 중이면 끝난 뒤에
-        if (rescanIdx < 0)
+        if (bg == null && slots.Any(s => s.Pending)) return false;   // 새로고침 처리 중이면 끝난 뒤에
+        if (rescanIdx < 0 && bg == null)
         {
             if (now - lastRescan < cfg.RereadSec * 1000) return false;
             lastRescan = now; rescanIdx = 0;            // 새 바퀴 시작
         }
-        // 한 번에 한 칸씩 (모든 칸을 한꺼번에 읽으면 그동안 새로고침 감지가 멈춤)
+        // 기본: 한 번에 한 칸씩 (모든 칸을 한꺼번에 읽으면 그동안 새로고침 감지가 멈춤)
+        // 동시 읽기: 모든 칸 숫자를 뒤에서(다른 스레드) 한꺼번에 읽고, 끝나면 다음 프레임에 반영 (화면 처리는 안 멈춤)
         bool changed = false;
-        if (rescanIdx >= slots.Count) { rescanIdx = -1; return false; }
-        foreach (var s in new[] { slots[rescanIdx++] })
+        List<Slot> todo;
+        List<List<OcrWord>>?[] ens;
+        if (ParallelReread && cfg.ParallelReread)
         {
+            if (bg == null)
+            {
+                if (rescanIdx < 0) return false;          // 쉬는 중
+                rescanIdx = -1;
+                var list = slots.Where(x => x.Card is { Sold: false, Status: not Verdict.Skip }).ToList();
+                if (list.Count == 0) return false;
+                var src0 = Src(f);
+                var jobs = list.Select(x => (slot: x, card: x.Card!, prep: Prep(src0, x.R, cfg.SlotOcrScale))).ToList();
+                var lay = slots;
+                bgSlots = lay;
+                bg = System.Threading.Tasks.Task.Run(() =>
+                {
+                    var res = new List<List<OcrWord>>?[jobs.Count];
+                    System.Threading.Tasks.Parallel.For(0, jobs.Count,
+                        new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 8) },
+                        i => res[i] = ReadPrepped(jobs[i].prep.img, jobs[i].slot.R, jobs[i].prep.sc, digits: true));
+                    return jobs.Select((j, i) => (j.slot, j.card, res[i])).ToList();
+                });
+                return false;
+            }
+            if (!bg.IsCompleted) return false;
+            var done = bg; bg = null;
+            if (done.IsFaulted) { Log?.Invoke("자동 읽기 오류: " + done.Exception?.GetBaseException().Message); return false; }
+            if (!ReferenceEquals(bgSlots, slots)) return false;   // 그사이 칸 배치가 바뀜
+            // 그사이 새로고침·구매로 바뀐 칸은 버림 (읽기 시작할 때와 같은 카드일 때만 반영)
+            var ok = done.Result.Where(x => !x.slot.Pending && ReferenceEquals(x.slot.Card, x.card)).ToList();
+            todo = ok.Select(x => x.slot).ToList();
+            ens = ok.Select(x => x.Item3).ToArray();
+        }
+        else
+        {
+            if (rescanIdx < 0) return false;
+            if (rescanIdx >= slots.Count) { rescanIdx = -1; return false; }
+            todo = new List<Slot> { slots[rescanIdx++] };
             if (rescanIdx >= slots.Count) rescanIdx = -1;
-            if (s.Card is { Sold: true } or { Status: Verdict.Skip }) continue;   // 매진·도박 칸은 다시 읽지 않음
+            todo.RemoveAll(x => x.Card is { Sold: true } or { Status: Verdict.Skip });   // 매진·도박 칸은 다시 읽지 않음
+            var src = Src(f);
+            ens = todo.Select(x => x.Card is { Sold: false } ? Read(src, x.R, cfg.SlotOcrScale, digits: true) : null).ToArray();
+        }
+        for (int ti = 0; ti < todo.Count; ti++)
+        {
+            var s = todo[ti];
             // 이미 읽은 칸은 숫자(가격·개수)만 다시 확인 (이름은 거의 안 틀리고, 숫자만 읽는 게 훨씬 빠름)
             if (s.Card is { Sold: false } cur)
             {
-                var en = Read(Src(f), s.R, cfg.SlotOcrScale, digits: true);
+                var en = ens[ti];
                 if (en != null)
                 {
                     var (p, q) = DigitsFrom(en, s);
@@ -345,9 +391,20 @@ public sealed class Tracker
     /// <summary>영역을 잘라 대비를 올리고 확대해서 OCR. 좌표는 화면 기준으로 되돌림. digits=true 면 영어 OCR (없으면 null).</summary>
     List<List<OcrWord>>? Read(Frame src, Box r, double scale, bool digits)
     {
+        var (img, sc) = Prep(src, r, scale);
+        return ReadPrepped(img, r, sc, digits);
+    }
+
+    /// <summary>OCR 할 그림 준비 (자르기·대비·확대). 결과는 새 그림이라 화면 버퍼가 바뀌어도 안전.</summary>
+    (Frame img, double sc) Prep(Frame src, Box r, double scale)
+    {
         var crop = src.Crop((int)r.X1, (int)r.Y1, (int)r.W, (int)r.H).AutoContrast();
         double sc = Math.Min(scale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
-        var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
+        return (Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop, sc);
+    }
+
+    List<List<OcrWord>>? ReadPrepped(Frame img, Box r, double sc, bool digits)
+    {
         var lines = digits ? ocr.RecognizeDigits(img, r, sc) : ocr.Recognize(img, r, sc);
         if (lines == null) return null;
         foreach (var ws in lines)

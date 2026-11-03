@@ -95,6 +95,8 @@ public sealed class Config
     [JsonPropertyName("slot_ocr_scale")] public double SlotOcrScale { get; set; } = 2.5;
     /// <summary>자동 읽기: 몇 초마다 모든 칸을 다시 읽는지 (0.1~1초). 기억해 둔 결과가 틀렸어도 바로잡음</summary>
     [JsonPropertyName("reread_sec")] public double RereadSec { get; set; } = 1;
+    /// <summary>자동 읽기 때 모든 칸을 동시에 읽기 (false 면 한 프레임에 한 칸씩, 예전 방식)</summary>
+    [JsonPropertyName("parallel_reread")] public bool ParallelReread { get; set; } = true;
     /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
     /// <summary>추천 기준: 이득이 이 값(결정) 이상인 칸만 초록 '구매'. 0 = 이득이면 모두</summary>
     [JsonPropertyName("recommend_min")] public double RecommendMin { get; set; } = 0;

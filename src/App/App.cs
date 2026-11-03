@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.4";
+    public const string Version = "1.7.5";
 
     [STAThread]
     static int Main(string[] args)
@@ -147,7 +147,7 @@ sealed class Engine
     public Engine(Config cfg, IOcr ocr, Overlay overlay)
     {
         this.cfg = cfg; this.ocr = ocr; this.overlay = overlay;
-        tracker = new Tracker(ocr, cfg) { Log = App.Log };
+        tracker = new Tracker(ocr, cfg) { Log = App.Log, ParallelReread = true };
     }
 
     public void Start() => new Thread(Run) { IsBackground = true, Name = "engine" }.Start();

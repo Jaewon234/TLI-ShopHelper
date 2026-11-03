@@ -305,9 +305,11 @@ sealed class Editor
         loading = true;
         rows.Clear();
         rateEdit = FieldEdit(Parser.FmtPrice(cfg.HuiseokPrice), S(FieldX), S(Header + 6), ID_RATE);
+        NumericEdit.Attach(rateEdit);
         {
             var (mx, my, _, _) = Side2Rect;
             minEdit = FieldEdit(Parser.FmtPrice(cfg.RecommendMin), mx + S(22), my + S(48), ID_MIN, S(90), "0 = 전부");
+            NumericEdit.Attach(minEdit);
         }
         int y = y0, i = 0;
         foreach (var it in items) AddRow(it.Name, it.Price is double p ? Parser.FmtPrice(p) : "", it, i++, editableName: false, ref y);
@@ -322,6 +324,7 @@ sealed class Editor
         var r = new Row { Label = name, Orig = orig, Y = y };
         if (editableName) r.NameEdit = FieldEdit(name, S(18), S(y), ID_NAME + i, S(148), NameCue);   // 오른쪽에 ✕ 자리
         r.PriceEdit = FieldEdit(price, S(FieldX), S(y), ID_PRICE + i, 0, PriceCue);
+        NumericEdit.Attach(r.PriceEdit);
         rows.Add(r);
         y += RowH;
     }
@@ -503,7 +506,7 @@ sealed class Editor
         var errors = new List<string>();
         double rate = PriceInput.CrystalPrice(cfg);
         double? huiseok = null;
-        if (PriceInput.TryParse(Text(rateEdit), 1, out var rv) && rv is double r0 && r0 > 0) { rate = 1 / r0; huiseok = r0; }
+        if (PriceInput.TryParse(Text(rateEdit), 1, out var rv) && rv is double r0 && r0 > 0) { rate = 1 / r0; huiseok = r0; SetNormalized(rateEdit, r0); }
         else errors.Add("신력의 휘석 시세");
 
         // 결정·도박 항목은 그대로 두고, 나머지만 입력값으로 바꿈
@@ -530,6 +533,7 @@ sealed class Editor
             }
             var it = r.Orig ?? new ItemDef { Name = name };
             it.Name = name; it.Price = v;
+            SetNormalized(r.PriceEdit, v);
             items.Add(it); seen.Add(it);
         }
         // 창을 연 뒤에 바깥에서 추가된 항목은 지우지 않음
@@ -547,6 +551,17 @@ sealed class Editor
         }
         status = errors.Count == 0 ? $"적용됨 {DateTime.Now:HH:mm:ss}" : "형식 오류는 이전 값 유지: " + string.Join(", ", errors);
         InvalidateRect(Hwnd, IntPtr.Zero, false);
+    }
+
+    /// <summary>입력칸 글자를 정리된 값으로 ("0.000" → "0", "0.0500" → "0.05", ".5" → "0.5"). 빈칸은 그대로.</summary>
+    void SetNormalized(IntPtr edit, double? v)
+    {
+        if (edit == IntPtr.Zero || v is not double d) return;
+        var norm = Parser.FmtPrice(d);
+        if (Text(edit).Trim() == norm) return;
+        bool was = loading; loading = true;
+        SetWindowTextW(edit, norm);
+        loading = was;
     }
 
     static bool In((int x, int y, int w, int h) r, int px, int py) => px >= r.x && px < r.x + r.w && py >= r.y && py < r.y + r.h;

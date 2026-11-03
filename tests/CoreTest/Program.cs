@@ -97,10 +97,11 @@ sealed class FakeOcr : IOcr
     public List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale)
     {
         if (!HasEnglish) return null;
-        en = true; try { return Recognize(img, src, scale); } finally { en = false; }
+        lock (this) { en = true; try { return Recognize(img, src, scale); } finally { en = false; } }
     }
     public int MaxDim => 10000;
-    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
+    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale) { lock (this) return RecognizeInner(img, src, scale); }
+    List<List<OcrWord>> RecognizeInner(Frame img, Box src, double scale)
     {
         Calls++;
         if (Fail) return new();
@@ -160,6 +161,21 @@ static class T
             Console.WriteLine($"== {Path.GetFileName(file)} {w}x{h} · 처리 {sw.ElapsedMilliseconds}ms");
             Console.Write(Parser.Describe(tr.Snap().Slots.Select(x => x.Card), cfg));
             var d0 = tr.Snap().Slots[0].D; Console.WriteLine($"    첫 칸 테두리: x {d0.X1:0}~{d0.X2:0}, y {d0.Y1:0}~{d0.Y2:0}");
+            cfg.RereadSec = 1;
+            foreach (bool par in new[] { false, true, false, true })
+            {
+                tr.ParallelReread = par;
+                t += 1100;
+                long worst = 0; var all = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 30; i++, t += 30)   // 실제 시간도 프레임마다 30ms 흐르게
+                {
+                    var one = System.Diagnostics.Stopwatch.StartNew();
+                    tr.Update(f, t);
+                    worst = Math.Max(worst, one.ElapsedMilliseconds);
+                    Thread.Sleep(30);
+                }
+                Console.WriteLine($"    자동 읽기 ({(par ? "동시" : "한 칸씩")}): 한 프레임 최대 {worst}ms 멈춤");
+            }
             Console.WriteLine("    색으로 본 매진: " + string.Join(" ", tr.Snap().Slots.Select((x, i) => $"{i + 1}:{(Tracker.SoldByColor(f, new Box(x.R.X1, x.R.Y2 - (x.R.Y2 - x.R.Y1) * 0.27, x.R.X2, x.R.Y2)) ? "매진" : "-")}")));
         }
         return 0;
@@ -336,6 +352,29 @@ static class T
         Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 80);
         Check(ocr8.Calls == 0, $"끄기면 다시 읽지 않음 - OCR {ocr8.Calls}번");
 
+        Console.WriteLine("[5d4b] 동시 읽기: 한 프레임에 모든 칸 숫자를 다시 읽어 바로잡음");
+        {
+            var ocrP = new FakeOcr { MisreadOnce = new() { ["588"] = "432" } };
+            var cfgP = new Config { CrystalRate = 50, RereadSec = 1 };
+            var trP = new Tracker(ocrP, cfgP) { RelayoutMs = 0, ParallelReread = true };
+            double tP = 0; trP.Reset(tP);
+            Run(trP, ocrP, Scene.Make(n6, p8), ref tP, 22);
+            bool wrongFirst = trP.Snap().Slots[4].Card?.Price == 432;
+            ocrP.HasEnglish = true;   // 다시 읽기는 숫자용(영어) OCR 로
+            // 1초가 지난 뒤 딱 한 프레임만에 고쳐지는지
+            var scP = Scene.Make(n6, p8); ocrP.Scene = scP; var fP = scP.Render();
+            double start = tP; int c0 = ocrP.Calls;
+            while (tP < start + 1500)
+            {
+                trP.Update(fP, tP); tP += 30; Thread.Sleep(2);   // 동시 읽기는 뒤에서 돌아서 실제 시간이 조금 필요
+                if (trP.Snap().Slots[4].Card?.Price == 588) break;
+            }
+            Check(ocrP.Calls - c0 >= 7, $"한 바퀴에 모든 칸을 읽음 - {ocrP.Calls - c0}번");
+            Check(trP.Snap().Slots[4].Card?.Price == 588, $"동시 읽기로 588 로 고침 (처음 {(wrongFirst ? 432 : 588)})");
+            cfgP.ParallelReread = false;
+            Check(!cfgP.ParallelReread, "parallel_reread=false 면 예전 방식(한 칸씩)");
+        }
+
         Console.WriteLine("[5d5] 한국어 OCR 이 숫자를 한글로 읽어도 영어 OCR 로 바로잡음 (200 → 2예, 60 → 匍)");
         string[][] n9 = {
             new[]{"최초의 불꽃","결정"}, new[]{"승화의 쐐기(매","직) X 20"}, new[]{"에너지 코어 X","10"}, new[]{"이계의 메아리 X","10"},
@@ -412,6 +451,8 @@ static class T
         Check(PriceInput.TryParse("0.11", 50, out v) && v == 0.11, "0.11");
         Check(PriceInput.TryParse("1/20", 50, out v) && v == 0.05, "1/20 = 0.05");
         Check(PriceInput.TryParse("5.5휘", 50, out v) && v == 0.11, "5.5휘 = 0.11");
+        foreach (var (inp, want) in new[] { ("0.000", 0.0), ("0.", 0.0), (".", 0.0), ("00", 0.0), (".5", 0.5), ("0.0500", 0.05), ("12.", 12.0) })
+            Check(PriceInput.TryParse(inp, 50, out v) && v == want && Parser.FmtPrice(v!.Value) == Parser.FmtPrice(want), $"\"{inp}\" → {Parser.FmtPrice(want)}");
         Check(PriceInput.TryParse("40휘/20", 50, out v) && v == 0.04, "40휘/20 = 0.04");
         Check(PriceInput.TryParse("20.5결", 50, out v) && v == 20.5, "20.5결 = 20.5");
         Check(PriceInput.TryParse("", 50, out v) && v == null, "빈칸 = 시세 없음");

@@ -57,23 +57,24 @@ public sealed class PaddleOcr : IOcr, IDisposable
     public List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale) => Run(img, english: true);
 
     // 같은 이미지를 한국어 → 영어 순서로 읽는 경우가 많아서, 글자 위치와 한국어 결과를 기억해 둠
-    Frame? lastImg;
-    List<(Box tight, Box wide)>? lastBoxes;
-    string[]? lastKo;
+    // 여러 스레드에서 동시에 불려도 되게 한 덩어리로 바꿔 끼움
+    sealed record LastRun(Frame Img, List<(Box tight, Box wide)> Boxes, string[]? Ko);
+    volatile LastRun? last;
     static readonly System.Text.RegularExpressions.Regex Hangul = new("[가-힣]");
 
     List<List<OcrWord>> Run(Frame img, bool english)
     {
         List<(Box tight, Box wide)> boxes;
         string[]? ko = null;
-        if (ReferenceEquals(img, lastImg) && lastBoxes != null) { boxes = lastBoxes; ko = lastKo; }
+        var lr = last;
+        if (lr != null && ReferenceEquals(img, lr.Img)) { boxes = lr.Boxes; ko = lr.Ko; }
         else
         {
             boxes = Detect(img);
             // 글자 위치를 못 찾았는데 한 줄 모양이면 (예: 가격 '4' 한 글자) 전체를 한 줄로 읽음
             if (boxes.Count == 0 && img.W > img.H * 1.5)
                 boxes.Add((new Box(0, 0, img.W, img.H), new Box(0, 0, img.W, img.H)));
-            lastImg = img; lastBoxes = boxes; lastKo = null;
+            last = new LastRun(img, boxes, null);
         }
         var lines = new List<List<OcrWord>>();
         var texts = new string[boxes.Count];
@@ -89,7 +90,7 @@ public sealed class PaddleOcr : IOcr, IDisposable
             if (text.Length == 0) continue;
             lines.Add(new List<OcrWord> { new(text, tb.X1, tb.Y1, tb.W, tb.H) });   // 위치 계산용은 실제 글자 크기 상자
         }
-        if (!english) lastKo = texts;
+        if (!english) last = new LastRun(img, boxes, texts);
         return lines;
     }
 
