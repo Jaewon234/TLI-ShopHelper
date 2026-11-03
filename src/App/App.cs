@@ -73,9 +73,24 @@ static class App
 
     /// <summary>공유용 '지금 화면 그대로 저장' (screen_날짜.png)</summary>
     public static string ShareDir => Folder("캡처");
-    /// <summary>문제 확인용 '현재 화면 저장' (capture_날짜.png + _result.txt/png)</summary>
+    /// <summary>문제 확인용 '현재 화면 저장' (문제확인_버전_날짜_번호.png + _result.txt/png)</summary>
     public static string DebugDir => Folder("문제확인");
     static string Folder(string name) { var d = Path.Combine(DataDir, name); Directory.CreateDirectory(d); return d; }
+
+    /// <summary>
+    /// 캡처 파일 이름: 용도_버전_날짜_번호 (예: 공유캡처_v1.7.7_2026-11-04_01). 같은 날 여러 장이면 번호가 올라감.
+    /// </summary>
+    public static string ShotBase(string dir, string purpose)
+    {
+        string day = DateTime.Now.ToString("yyyy-MM-dd");
+        int n = 1;
+        foreach (var f in Directory.EnumerateFiles(dir, $"{purpose}_*_{day}_*"))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(Path.GetFileNameWithoutExtension(f), $@"_{day}_(\d+)");
+            if (m.Success && int.TryParse(m.Groups[1].Value, out int k) && k >= n) n = k + 1;
+        }
+        return Path.Combine(dir, $"{purpose}_v{Version}_{day}_{n:00}");
+    }
 
     /// <summary>예전 버전이 exe 폴더에 바로 저장한 캡처 파일을 각 폴더로 정리.</summary>
     public static void TidyShots()
@@ -394,7 +409,7 @@ sealed class Engine
             using var g = new Grabber();
             var f = rect is { } r ? g.Grab(r.X, r.Y, r.W, r.H) : null;
             if (f == null) { overlay.Notify("저장 실패", "게임 창을 찾지 못했습니다."); return; }
-            string baseName = Path.Combine(App.DebugDir, $"capture_{DateTime.Now:yyyyMMdd_HHmmss}");
+            string baseName = App.ShotBase(App.DebugDir, "문제확인");
             ImageFile.SavePng(f, baseName + ".png");
             Diagnose.Run(f, ocr, cfg, baseName + "_result");
             overlay.Notify("화면 저장됨", Path.GetFileName(baseName) + ".png / _result.txt");
