@@ -292,7 +292,7 @@ public sealed class Tracker
         if (ps != null) price = Parser.PriceValue(ps.Text);
         foreach (var g in segs.Where(g => g.B.Cx > s.R.X1 && g.B.Cx < s.R.X2 && g.B.Y2 > s.R.Y1 && (g.B.Y1 + g.B.Y2) / 2 < s.PriceR.Y1 - h * 0.3))
         {
-            var m = System.Text.RegularExpressions.Regex.Match(Parser.Norm(g.Text), @"[XxХх×]\s*([0-9]{1,4})$");
+            var m = System.Text.RegularExpressions.Regex.Match(Parser.Norm(g.Text), @"[XxХх×&*]\s*([0-9]{1,4})$");
             if (m.Success) { qty = int.Parse(m.Groups[1].Value); break; }
             if (System.Text.RegularExpressions.Regex.IsMatch(Parser.Norm(g.Text), @"^[0-9]{1,4}$")) qty = int.Parse(Parser.Norm(g.Text));
         }
@@ -336,7 +336,7 @@ public sealed class Tracker
         bool fixedUp = false;
         if (!card.Sold && enPrice is int ep && ep != card.Price) { Log?.Invoke($"가격 {card.Price} → {ep} (영어 OCR)"); card.Price = ep; fixedUp = true; }
         // 개수: 한국어 결과에 X 가 있거나 2개 이상일 때만 영어 쪽 숫자로 바로잡음 (개수 없는 상품에 엉뚱한 숫자가 붙지 않게)
-        if (enQty is int eq && eq > 0 && eq != card.Qty && (card.Qty > 1 || card.Raw.IndexOfAny(new[] { 'X', 'x', '×' }) >= 0))
+        if (enQty is int eq && eq > 0 && eq != card.Qty && (card.Qty > 1 || Parser.HasQtyMark(card.Raw)))
         { Log?.Invoke($"개수 {card.Qty} → {eq} (영어 OCR)"); card.Qty = eq; fixedUp = true; }
         if (fixedUp) Parser.Evaluate(card, cfg);
     }
@@ -462,7 +462,8 @@ public sealed class Tracker
                 {
                     R = new Box(c0 - half, py1 - 4.6 * h, c0 + half, py2 + 0.2 * h),
                     PriceR = new Box(c0 - half, py1 - 0.2 * h, c0 + half, py2 + 0.2 * h),
-                    D = new Box(c0 - dhalf, py1 - 12.3 * h, c0 + dhalf, py2 + 0.6 * h),
+                    // 카드 높이 ≈ 칸 간격의 1.49배 (작은 UI 191/133, 큰 UI 303/201). 글자 높이는 OCR 종류마다 달라서 간격으로 계산
+                    D = new Box(c0 - dhalf, py2 + 0.6 * h - spacing * 1.49, c0 + dhalf, py2 + 0.6 * h),
                 });
             }
         }

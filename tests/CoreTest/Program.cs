@@ -156,6 +156,7 @@ static class T
             for (int i = 0; i < 40; i++, t += 50) { tr.Update(f, t); if (i > 2 && tr.Snap().Slots.All(x => !x.Pending)) break; }
             Console.WriteLine($"== {Path.GetFileName(file)} {w}x{h} · 처리 {sw.ElapsedMilliseconds}ms");
             Console.Write(Parser.Describe(tr.Snap().Slots.Select(x => x.Card), cfg));
+            var d0 = tr.Snap().Slots[0].D; Console.WriteLine($"    첫 칸 테두리: x {d0.X1:0}~{d0.X2:0}, y {d0.Y1:0}~{d0.Y2:0}");
         }
         return 0;
     }
@@ -182,7 +183,7 @@ static class T
         Console.WriteLine("[1a] 가격: OCR 이 0 을 O 로 읽어도 (200 → 2 로 읽던 문제)");
         foreach (var (txt, want) in new (string, int)[] { ("2OO", 200), ("十5OO", 500), ("◆1O7", 107), ("◆66", 66), ("十48", 48), ("l66", 66), ("534", 534), ("1,025", 1025), ("200", 200) })
             Check(Parser.IsPrice(txt) && Parser.PriceValue(txt) == want, $"{txt} → {(Parser.IsPrice(txt) ? Parser.PriceValue(txt) : -1)}");
-        foreach (var txt in new[] { "가루X60", "직)X20", "결정", "이계의메아리X", "2OOx", "새로고침" })
+        foreach (var txt in new[] { "가루X60", "직)X20", "직X20", "X20", "결정", "이계의메아리X", "2OOx", "새로고침" })
             Check(!Parser.IsPrice(txt), $"{txt} 는 가격 아님");
         var gs = new Config(); var gcard = new Card { Name = "신비의휘석(소)", Qty = 1, Price = Parser.PriceValue("2OO") }; Parser.Evaluate(gcard, gs);
         Check(gcard.Diff == 0, $"신비의 휘석(소) 2OO → 200 → 기대 0 (전에는 +198휘 = +3.56결)");
@@ -190,7 +191,8 @@ static class T
         Console.WriteLine("[1b] 개수: OCR 이 X 를 놓쳐도");
         foreach (var (lines2, want) in new (string[], int)[] {
             (new[] { "최초의 불꽃", "결정 10", "390" }, 10), (new[] { "최초의 불꽃", "결정10", "390" }, 10),
-            (new[] { "이계의 메아리", "20", "107" }, 20), (new[] { "최초의 불꽃", "결정", "56" }, 1), (new[] { "신비의 휘석(소)", "200" }, 1) })
+            (new[] { "이계의 메아리", "20", "107" }, 20), (new[] { "최초의 불꽃", "결정", "56" }, 1), (new[] { "신비의 휘석(소)", "200" }, 1),
+            (new[] { "에너지코어&", "10", "77" }, 10), (new[] { "에너지코어*", "20", "153" }, 20) })
         {
             var ws = new List<List<OcrWord>>(); double yy = 200;
             foreach (var ln in lines2) { double xx = 400; var row = new List<OcrWord>(); foreach (var w in ln.Split(' ')) { row.Add(new OcrWord(w, xx, yy, w.Length * 12, 14)); xx += w.Length * 12 + 4; } ws.Add(row); yy += 20; }

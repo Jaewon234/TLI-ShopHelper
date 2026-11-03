@@ -88,8 +88,8 @@ public static class Parser
     static readonly Regex NonDigit = new(@"\D", RegexOptions.Compiled);
     static readonly Regex NonPriceChars = new(@"[\d\s,.]", RegexOptions.Compiled);
     static readonly Regex Hangul = new(@"[가-힣]", RegexOptions.Compiled);
-    static readonly Regex TrailingX = new(@"[XxХх×]$", RegexOptions.Compiled);
-    static readonly Regex QtyRe = new(@"^(.*?)[XxХх×]\s*(\d+)$", RegexOptions.Compiled);
+    static readonly Regex TrailingX = new(@"[XxХх×&*ⅩㄨㄧӾ乂]$", RegexOptions.Compiled);
+    static readonly Regex QtyRe = new(@"^(.*?)[XxХх×&*ⅩㄨӾ乂]\s*(\d+)$", RegexOptions.Compiled);   // OCR 이 X 를 & * 등으로 읽는 경우 포함
     // OCR 이 'X' 를 놓친 경우: 상품 이름은 숫자로 끝나지 않으므로 끝의 숫자를 개수로 봄 (예: 결정10, 결정 10)
     static readonly Regex QtyNoXRe = new(@"^(.*[가-힣)])\s*(\d{1,4})$", RegexOptions.Compiled);
 
@@ -117,8 +117,12 @@ public static class Parser
         return sb.ToString();
     }
 
+    /// <summary>개수 표시 X 처럼 보이는 글자 (OCR 이 & * × 등으로 읽음)</summary>
+    public static bool HasQtyMark(string t) => t.IndexOfAny(new[] { 'X', 'x', 'Х', 'х', '×', '&', '*', 'Ⅹ', 'ㄨ', 'Ӿ', '乂' }) >= 0;
+
     public static bool IsPrice(string t)
     {
+        if (HasQtyMark(t)) return false;   // 'X20' 같은 개수 줄은 가격이 아님
         var m = PriceRe.Match(NormalizePrice(t));
         return m.Success && m.Groups[1].Value.Replace(",", "").Length <= 6;
     }

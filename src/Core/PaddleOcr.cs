@@ -58,36 +58,44 @@ public sealed class PaddleOcr : IOcr, IDisposable
 
     // 같은 이미지를 한국어 → 영어 순서로 읽는 경우가 많아서, 글자 위치와 한국어 결과를 기억해 둠
     Frame? lastImg;
-    List<Box>? lastBoxes;
+    List<(Box tight, Box wide)>? lastBoxes;
     string[]? lastKo;
     static readonly System.Text.RegularExpressions.Regex Hangul = new("[가-힣]");
 
     List<List<OcrWord>> Run(Frame img, bool english)
     {
-        List<Box> boxes;
+        List<(Box tight, Box wide)> boxes;
         string[]? ko = null;
         if (ReferenceEquals(img, lastImg) && lastBoxes != null) { boxes = lastBoxes; ko = lastKo; }
-        else { boxes = Detect(img); lastImg = img; lastBoxes = boxes; lastKo = null; }
+        else
+        {
+            boxes = Detect(img);
+            // 글자 위치를 못 찾았는데 한 줄 모양이면 (예: 가격 '4' 한 글자) 전체를 한 줄로 읽음
+            if (boxes.Count == 0 && img.W > img.H * 1.5)
+                boxes.Add((new Box(0, 0, img.W, img.H), new Box(0, 0, img.W, img.H)));
+            lastImg = img; lastBoxes = boxes; lastKo = null;
+        }
         var lines = new List<List<OcrWord>>();
         var texts = new string[boxes.Count];
         for (int i = 0; i < boxes.Count; i++)
         {
-            var b = boxes[i];
+            var (tb, b) = boxes[i];
             string text;
-            if (english && ko != null && Hangul.IsMatch(ko[i]) && !ko[i].Any(char.IsAsciiDigit) && ko[i].IndexOfAny(new[] { 'X', 'x', '×' }) < 0)
+            if (english && ko != null && Hangul.IsMatch(ko[i]) && !ko[i].Any(char.IsAsciiDigit) && !Parser.HasQtyMark(ko[i]))
                 text = ko[i];   // 숫자·X 가 없는 한글 줄(상품 이름)은 영어로 다시 읽을 필요 없음
             else
                 text = Read(img, english ? WhiteOnly(img, b) : b, english);
             texts[i] = text;
             if (text.Length == 0) continue;
-            lines.Add(new List<OcrWord> { new(text, b.X1, b.Y1, b.W, b.H) });
+            lines.Add(new List<OcrWord> { new(text, tb.X1, tb.Y1, tb.W, tb.H) });   // 위치 계산용은 실제 글자 크기 상자
         }
         if (!english) lastKo = texts;
         return lines;
     }
 
     // ---------------- 글자 위치 찾기 (DB) ----------------
-    public List<Box> Detect(Frame img)
+    /// <summary>글자 줄 위치. tight = 실제 글자 크기(위치 계산용, Windows OCR 상자와 비슷), wide = 넉넉히 넓힌 상자(글자 읽기용).</summary>
+    public List<(Box tight, Box wide)> Detect(Frame img)
     {
         double r = Math.Max(img.W, img.H) > DetLimit ? (double)DetLimit / Math.Max(img.W, img.H) : 1.0;
         int nw = Math.Max(32, (int)Math.Round(img.W * r / 32) * 32), nh = Math.Max(32, (int)Math.Round(img.H * r / 32) * 32);
@@ -109,7 +117,7 @@ public sealed class PaddleOcr : IOcr, IDisposable
 
         // 연결된 영역(글자 줄) 찾기
         var seen = new bool[p.Length];
-        var boxes = new List<Box>();
+        var boxes = new List<(Box tight, Box wide)>();
         var stack = new Stack<int>();
         double sx = (double)img.W / pw, sy = (double)img.H / ph;
         for (int i = 0; i < p.Length; i++)
@@ -133,11 +141,15 @@ public sealed class PaddleOcr : IOcr, IDisposable
             }
             if (area < 6 || sum / area < 0.5) continue;
             double bw = x1 - x0 + 1, bh = y1 - y0 + 1;
-            double d = bw * bh * 2.0 / (2 * (bw + bh));           // 넓히기 (unclip 2.0)
-            boxes.Add(new Box(Math.Max(0, (x0 - d) * sx), Math.Max(0, (y0 - d) * sy),
-                              Math.Min(img.W, (x1 + 1 + d) * sx), Math.Min(img.H, (y1 + 1 + d) * sy)));
+            double d = bw * bh * 2.0 / (2 * (bw + bh));           // 넓히기 (unclip 2.0) → 읽기용
+            double t = bh * 0.28;                                 // 확률 지도의 글자 영역은 실제보다 작음 → 실제 글자 높이 ≈ 1.55배
+            var wide = new Box(Math.Max(0, (x0 - d) * sx), Math.Max(0, (y0 - d) * sy),
+                               Math.Min(img.W, (x1 + 1 + d) * sx), Math.Min(img.H, (y1 + 1 + d) * sy));
+            var tight = new Box(Math.Max(0, (x0 - t) * sx), Math.Max(0, (y0 - t) * sy),
+                                Math.Min(img.W, (x1 + 1 + t) * sx), Math.Min(img.H, (y1 + 1 + t) * sy));
+            boxes.Add((tight, wide));
         }
-        return boxes.OrderBy(b => b.Y1).ThenBy(b => b.X1).ToList();
+        return boxes.OrderBy(b => b.tight.Y1).ThenBy(b => b.tight.X1).ToList();
     }
 
     /// <summary>숫자 읽기용: 흰색(밝고 채도 낮은) 글자 부분만 → 가격 앞 보라색 보석 아이콘을 뺌.</summary>
