@@ -120,8 +120,11 @@ sealed class Overlay
         if (UpdatedFrom != null)
         {
             App.Log($"업데이트 완료: v{UpdatedFrom} → v{App.Version}");
-            string from = UpdatedFrom;
-            new Thread(() => Info($"업데이트 완료\n\nv{from} → v{App.Version}\n\n시세는 그대로 유지됩니다.")) { IsBackground = true }.Start();
+            // 소리 없는 완료 창 (업데이트 진행 창과 같은 모양), 1.5초 뒤 저절로 닫힘
+            progress.Show("ShopHelperProgress", inst, $"업데이트 v{UpdatedFrom} → v{App.Version}");
+            progress.Set("업데이트 완료", "시세는 그대로 유지됩니다.", 1, done: true);
+            var ph = progress.Hwnd;
+            new Thread(() => { Thread.Sleep(1500); PostMessageW(ph, 0x10 /*WM_CLOSE*/, IntPtr.Zero, IntPtr.Zero); }) { IsBackground = true }.Start();
         }
         // 업데이트 확인: 켠 뒤 10초, 그 뒤 6시간마다
         new Thread(() =>
