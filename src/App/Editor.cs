@@ -241,6 +241,9 @@ sealed class Editor
     const int W = 400, Header = 58, RowH = 38, FieldX = 196, FieldW = 108, FieldH = 30;
     // 오른쪽 아래에 붙은 '자동 읽기' 칸
     const int SideW = 170, SideGap = 10, SideH = 150;
+    const int ID_MIN = 4005;
+    IntPtr minEdit;   // 추천 기준 입력칸
+    (int x, int y, int w, int h) Side2Rect { get { var (sx, sy, sw, sh) = SideRect; return (sx + sw + S(SideGap), sy, sw, sh); } }
     // 자동 읽기 슬라이더: 0.1초 ~ 1초 (0.1초 단위)
     const double SpeedMin = 0.1, SpeedMax = 1.0;
     bool dragging;
@@ -279,7 +282,7 @@ sealed class Editor
         int n = items.Count + extra.Count + 1;
 
         mainW = S(W);
-        winW = mainW + S(SideGap + SideW);
+        winW = mainW + S(SideGap + SideW) * 2;   // 자동 읽기 + 추천 기준
         int y0 = Header + 52;                     // 결정 환율 줄 + 구분선 아래
         footerY = S(y0 + RowH * n + 6);
         winH = Math.Max(footerY + S(62), S(SideH));
@@ -292,12 +295,20 @@ sealed class Editor
         var side = CreateRoundRectRgn(sx0, sy0, sx0 + sw0 + 1, sy0 + sh0 + 1, S(28), S(28));
         CombineRgn(rgn, rgn, side, 2 /*RGN_OR*/);
         DeleteObject(side);
+        var (tx0, ty0, tw0, th0) = Side2Rect;
+        var side2 = CreateRoundRectRgn(tx0, ty0, tx0 + tw0 + 1, ty0 + th0 + 1, S(28), S(28));
+        CombineRgn(rgn, rgn, side2, 2 /*RGN_OR*/);
+        DeleteObject(side2);
         SetWindowRgn(Hwnd, rgn, true);
         SetWindowDisplayAffinity(Hwnd, 0x11);                                // 화면 캡처(OCR)에 안 찍히게
 
         loading = true;
         rows.Clear();
         rateEdit = FieldEdit(Parser.FmtPrice(cfg.HuiseokPrice), S(FieldX), S(Header + 6), ID_RATE);
+        {
+            var (mx, my, _, _) = Side2Rect;
+            minEdit = FieldEdit(Parser.FmtPrice(cfg.RecommendMin), mx + S(22), my + S(48), ID_MIN, S(90), "0 = 전부");
+        }
         int y = y0, i = 0;
         foreach (var it in items) AddRow(it.Name, it.Price is double p ? Parser.FmtPrice(p) : "", it, i++, editableName: false, ref y);
         foreach (var name in extra) AddRow(name, "", null, i++, editableName: true, ref y);
@@ -364,6 +375,7 @@ sealed class Editor
         c.Clear(Bg);
         c.StrokeRound(0.5, 0.5, mainW - 1, winH - 1, S(14), Border, 1);
         DrawSpeed(c);
+        DrawMin(c, withTexts);
         // 머리
         c.FillRect(S(18), S(20), S(4), S(20), Gold);
         c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
@@ -437,6 +449,22 @@ sealed class Editor
                 if (Text(r.PriceEdit).Length > 0) c.Text(S(FieldX) + S(10), S(r.Y) + ey, Text(r.PriceEdit), S(15), false, Txt);
             }
         }
+    }
+
+    /// <summary>추천 기준 칸: 이득이 몇 결정 이상이면 초록 '구매' 로 보일지 (입력 즉시 적용·저장)</summary>
+    void DrawMin(Canvas c, bool withTexts)
+    {
+        var (sx, sy, sw, sh) = Side2Rect;
+        c.FillRound(sx, sy, sw, sh, S(14), Bg);
+        c.StrokeRound(sx + 0.5, sy + 0.5, sw - 1, sh - 1, S(14), Border, 1);
+        c.FillRect(sx + S(14), sy + S(16), S(4), S(18), Gold);
+        c.Text(sx + S(24), sy + S(12), "추천 기준", S(16), true, Txt);
+        FieldBg(c, sx + S(22), sy + S(48), S(90), withTexts ? Text(minEdit) : "x", true);
+        if (withTexts) c.Text(sx + S(32), sy + S(48) + (S(FieldH) - S(20)) / 2, Text(minEdit), S(15), false, Txt);
+        c.Text(sx + S(22) + S(90) + S(8), sy + S(55), "결", S(14), true, Muted);
+        bool ok = PriceInput.TryParse(Text(minEdit), 1, out var v);
+        c.Text(sx + S(14), sy + S(90), ok ? "이득이 이 값 이상인" : "숫자를 넣어 주세요", S(12), false, ok ? Dim : Warn);
+        c.Text(sx + S(14), sy + S(108), "칸만 초록 '구매'", S(12), false, Dim);
     }
 
     /// <summary>자동 읽기 칸: 몇 초마다 모든 칸을 다시 읽을지 (누르면 바로 적용·저장).</summary>
@@ -591,6 +619,18 @@ sealed class Editor
             case WM_COMMAND_:
             {
                 int id = (int)(w.ToInt64() & 0xFFFF), code = (int)((w.ToInt64() >> 16) & 0xFFFF);
+                if (code == EN_CHANGE && !loading && id == ID_MIN)
+                {
+                    // 추천 기준은 입력하는 즉시 적용·저장 (시세처럼 [적용] 필요 없음)
+                    if (PriceInput.TryParse(Text(minEdit), 1, out var mv))
+                    {
+                        cfg.RecommendMin = Math.Max(0, mv ?? 0);
+                        try { App.SaveSettings(cfg); } catch { }
+                        applied();
+                    }
+                    InvalidateRect(Hwnd, IntPtr.Zero, false);
+                    return IntPtr.Zero;
+                }
                 if (code == EN_CHANGE && !loading)
                 {
                     dirty = true;

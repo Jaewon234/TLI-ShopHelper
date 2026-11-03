@@ -297,7 +297,7 @@ public sealed class Tracker
 
     void NoteBought(Card c)
     {
-        if (c.Status is Verdict.Good or Verdict.Bad && c.Diff is double d)
+        if (c.Status is Verdict.Good or Verdict.Bad or Verdict.Minor && c.Diff is double d)
         {
             Bought++; BoughtGain += d;
             Log?.Invoke($"구매: {c.Name} x{c.Qty} {c.Price}휘 → 이득 {d:+0.##;-0.##}휘");

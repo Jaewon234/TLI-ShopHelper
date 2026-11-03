@@ -283,7 +283,9 @@ public static class Parser
             ? Math.Ceiling(Math.Round(market * (1 - cfg.TaxRate), 6))
             : Math.Round(market, 6);
         cd.Diff = Math.Round(cd.Value.Value - cd.Price, 2);
-        cd.Status = cd.Diff > 0 ? Verdict.Good : Verdict.Bad;
+        // 추천 기준(결정) 이상 이득이면 구매, 이득이지만 기준보다 작으면 Minor
+        double minH = Math.Max(0, cfg.RecommendMin) * (cfg.CrystalRate > 0 ? cfg.CrystalRate : 50);
+        cd.Status = cd.Diff <= 0 ? Verdict.Bad : cd.Diff >= minH && cd.Diff > 0 ? Verdict.Good : Verdict.Minor;
     }
 
     public static Seg? FindRefresh(List<Seg> segs) =>

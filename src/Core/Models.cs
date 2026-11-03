@@ -27,7 +27,7 @@ public sealed class Seg
     public double H;
 }
 
-public enum Verdict { Unknown, Good, Bad, Sold, Gamble, Skip }   // Skip = 판정하지 않음 (신비의 휘석 도박)
+public enum Verdict { Unknown, Good, Bad, Sold, Gamble, Skip, Minor }   // Minor = 이득이지만 추천 기준보다 작음   // Skip = 판정하지 않음 (신비의 휘석 도박)
 
 public sealed class Card
 {
@@ -96,6 +96,8 @@ public sealed class Config
     /// <summary>자동 읽기: 몇 초마다 모든 칸을 다시 읽는지 (0.1~1초). 기억해 둔 결과가 틀렸어도 바로잡음</summary>
     [JsonPropertyName("reread_sec")] public double RereadSec { get; set; } = 1;
     /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
+    /// <summary>추천 기준: 이득이 이 값(결정) 이상인 칸만 초록 '구매'. 0 = 이득이면 모두</summary>
+    [JsonPropertyName("recommend_min")] public double RecommendMin { get; set; } = 0;
     [JsonPropertyName("ocr_engine")] public string OcrEngine { get; set; } = "auto";
     [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
     /// <summary>받아 봤더니 버전이 오르지 않은 릴리스 (태그를 잘못 붙인 경우) → 다시 권하지 않음</summary>

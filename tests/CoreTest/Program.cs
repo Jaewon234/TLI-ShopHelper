@@ -422,6 +422,14 @@ static class T
         foreach (var it in new Config().Items.Where(i => i.Price is double))
             Check(PriceInput.TryParse(Parser.FmtPrice(it.Price!.Value), 50, out var back) && back == it.Price, $"{it.Name}: 표시→다시 읽기 그대로 ({Parser.FmtPrice(it.Price!.Value)})");
 
+        Console.WriteLine("[7b] 추천 기준: 0.1결 이상만 구매");
+        var rcfg = new Config { CrystalRate = 50, RecommendMin = 0.1 };
+        Card M(int price) { var c = new Card { Name = "최초의불꽃결정", Qty = 1, Price = price }; Parser.Evaluate(c, rcfg); return c; }
+        Check(M(44).Status == Verdict.Good && M(47).Status == Verdict.Minor && M(50).Status == Verdict.Bad && M(51).Status == Verdict.Bad,
+              "결정 1개: 44휘(+0.12결)=구매, 47휘(+0.06결)=기준 미달, 50휘(0)=손해");
+        rcfg.RecommendMin = 0;
+        Check(M(49).Status == Verdict.Good, "기준 0 이면 이득이면 모두 구매");
+
         Console.WriteLine("[8] 신비의 휘석(소) 도박");
         var gc = new Config();
         Card G(int price) { var c = new Card { Name = "신비의휘석(소)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }

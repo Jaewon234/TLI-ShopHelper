@@ -547,6 +547,11 @@ sealed class Overlay
                     c.Pill(d.Cx, d.Y1, Efficiency(cd), small, true, Canvas.Argb(235, 40, 28, 6), Amber);
                     c.Pill(d.Cx, d.Y1 + small * 1.75, GambleLine(cd), tiny, true, Canvas.Argb(215, 40, 28, 6), Canvas.Argb(255, 220, 190, 120));
                     break;
+                case Verdict.Minor:
+                    // 이득이지만 추천 기준보다 작음: 손해 칸과 같은 모양, 글씨만 초록
+                    c.FillRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.Argb(140, 8, 10, 16));
+                    c.Pill(d.Cx, d.Y1, Gain(cd.Diff!.Value), small, true, Canvas.Argb(225, 10, 30, 16), Green);
+                    break;
                 case Verdict.Bad:
                     c.FillRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.Argb(140, 8, 10, 16));   // 손해 칸은 눌러줌
                     c.Pill(d.Cx, d.Y1, Gain(cd.Diff!.Value), small, true, Canvas.Argb(225, 30, 12, 14), Red);
