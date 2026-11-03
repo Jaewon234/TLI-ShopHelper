@@ -21,7 +21,7 @@ sealed class Overlay
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     volatile Updater.Release? update;
-    public string? UpdatedFrom;
+    public string? UpdatedFrom, UpdatedTag;
     volatile bool popupOpen;
     /// <summary>상점 안 다른 창(구매 창 등)이 열렸는지. 바뀌었으면 true.</summary>
     public bool SetPopup(bool open) { if (popupOpen == open) return false; popupOpen = open; return true; }
@@ -123,7 +123,16 @@ sealed class Overlay
             App.Log($"업데이트 완료: v{UpdatedFrom} → v{App.Version}");
             // 소리 없는 완료 창 (업데이트 진행 창과 같은 모양), 1.5초 뒤 저절로 닫힘
             progress.Show("ShopHelperProgress", inst, $"업데이트 v{UpdatedFrom} → v{App.Version}");
-            progress.Set("업데이트 완료", "시세는 그대로 유지됩니다.", 1, done: true);
+            bool notNewer = Version.TryParse(UpdatedFrom, out var fromV) && Updater.Current <= fromV;
+            if (notNewer && UpdatedTag != null)
+            {
+                // 태그는 더 높은데 실제 버전은 그대로/낮음 (태그를 잘못 붙인 릴리스) → 다시 권하지 않게 기억
+                cfg.SkipUpdateTag = UpdatedTag;
+                try { App.SaveSettings(cfg); } catch { }
+                App.Log($"릴리스 {UpdatedTag} 는 실제 버전이 v{App.Version} → 다음부터 건너뜀");
+                progress.Set("버전이 오르지 않았습니다", $"{UpdatedTag} 는 실제로 v{App.Version} 입니다. 다음부터 건너뜁니다.", 1, done: true);
+            }
+            else progress.Set("업데이트 완료", "시세는 그대로 유지됩니다.", 1, done: true);
             var ph = progress.Hwnd;
             new Thread(() => { Thread.Sleep(1500); PostMessageW(ph, 0x10 /*WM_CLOSE*/, IntPtr.Zero, IntPtr.Zero); }) { IsBackground = true }.Start();
         }
@@ -227,7 +236,12 @@ sealed class Overlay
         {
             var r = Updater.Latest(cfg.UpdateRepo).GetAwaiter().GetResult();
             App.Log($"업데이트 확인: 최신 {r.Tag}, 지금 v{App.Version}");
-            if (r.Ver > Updater.Current)
+            if (r.Tag == cfg.SkipUpdateTag && r.Tag.Length > 0)
+            {
+                App.Log($"업데이트 확인: {r.Tag} 는 예전에 받아 보니 실제 버전이 오르지 않아 건너뜀");
+                if (manual) Info($"최신 릴리스 {r.Tag} 는 실제로는 새 버전이 아니라서 건너뜁니다.\n(태그를 잘못 붙인 릴리스일 수 있어요)\n\n지금 v{App.Version}");
+            }
+            else if (r.Ver > Updater.Current)
             {
                 update = r;
                 PostMessageW(hwnd, MSG_UPDATE, IntPtr.Zero, IntPtr.Zero);   // 이익 카드에 '새 버전' 표시
@@ -277,7 +291,7 @@ sealed class Overlay
                 App.Log($"업데이트 {r.Tag} 받음 → {dir}");
                 progress.Set("설치 준비 완료 · 다시 시작합니다", "잠시 뒤 새 버전이 켜지면 '업데이트 완료' 창이 뜹니다.", 1, done: true);
                 Thread.Sleep(1200);
-                Updater.Launch(dir);
+                Updater.Launch(dir, r.Tag);
                 PostMessageW(msgWnd, MSG_QUIT, IntPtr.Zero, IntPtr.Zero);   // 새 버전이 이 프로그램이 끝나길 기다림
             }
             catch (Exception e)

@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.6.12";
+    public const string Version = "1.6.13";
 
     [STAThread]
     static int Main(string[] args)
@@ -85,8 +85,9 @@ static class App
         SetProcessDpiAwarenessContext(new IntPtr(-4)); // Per-monitor v2
         // 자동 업데이트: 새 버전이 임시 폴더에서 이 옵션으로 실행되어 설치 폴더에 자기를 복사
         if (args.Length >= 3 && args[0] == "--install-update" && int.TryParse(args[2], out int oldPid))
-            return Updater.InstallHere(args[1], oldPid, args.Length >= 4 ? args[3] : null);
+            return Updater.InstallHere(args[1], oldPid, args.Length >= 4 ? args[3] : null, args.Length >= 5 ? args[4] : null);
         string? updatedFrom = args.Length >= 2 && args[0] == "--updated-from" ? args[1] : null;
+        string? updatedTag = args.Length >= 3 && args[0] == "--updated-from" ? args[2] : null;
         Updater.Cleanup();
         Config cfg;
         try { cfg = LoadConfig(); Log("시세 파일: " + PricesPath); }
@@ -121,7 +122,7 @@ static class App
         if (!first) { Error("이미 실행 중입니다. (작업 표시줄 오른쪽 트레이 아이콘 확인)"); return 0; }
 
         ConfigSaved();
-        var overlay = new Overlay(cfg) { UpdatedFrom = updatedFrom };
+        var overlay = new Overlay(cfg) { UpdatedFrom = updatedFrom, UpdatedTag = updatedTag };
         var engine = new Engine(cfg, ocr, overlay);
         overlay.Engine = engine;
         overlay.Run(engine.Start); // 창을 만든 뒤 엔진 시작

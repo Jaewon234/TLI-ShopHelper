@@ -98,6 +98,8 @@ public sealed class Config
     /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
     [JsonPropertyName("ocr_engine")] public string OcrEngine { get; set; } = "auto";
     [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
+    /// <summary>받아 봤더니 버전이 오르지 않은 릴리스 (태그를 잘못 붙인 경우) → 다시 권하지 않음</summary>
+    [JsonPropertyName("skip_update_tag")] public string SkipUpdateTag { get; set; } = "";
     [JsonPropertyName("update_repo")] public string UpdateRepo { get; set; } = "Jaewon234/TLI-ShopHelper";
     [JsonPropertyName("window_class")] public string WindowClass { get; set; } = "UnrealWindow";
     [JsonPropertyName("window_title_contains")] public string WindowTitleContains { get; set; } = "";

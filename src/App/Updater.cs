@@ -49,11 +49,15 @@ static class Updater
         string tag = root.GetProperty("tag_name").GetString() ?? "";
         var ver = Version.Parse(tag.TrimStart('v', 'V'));
         string page = root.TryGetProperty("html_url", out var hu) ? hu.GetString() ?? "" : "";
-        foreach (var a in root.GetProperty("assets").EnumerateArray())
+        // 첨부 파일: 이름이 정확히 ShopHelper.zip 인 것, 없으면 zip 이 하나뿐일 때 그것 (이름 오타 대비)
+        var zips = root.GetProperty("assets").EnumerateArray()
+            .Where(a => (a.GetProperty("name").GetString() ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
+        var pick = zips.FirstOrDefault(a => string.Equals(a.GetProperty("name").GetString(), AssetName, StringComparison.OrdinalIgnoreCase));
+        if (pick.ValueKind == JsonValueKind.Undefined && zips.Count == 1) pick = zips[0];
+        if (pick.ValueKind != JsonValueKind.Undefined)
         {
-            if (!string.Equals(a.GetProperty("name").GetString(), AssetName, StringComparison.OrdinalIgnoreCase)) continue;
-            string? sha = a.TryGetProperty("digest", out var d) && d.GetString() is string ds && ds.StartsWith("sha256:") ? ds[7..] : null;
-            return new Release(ver, tag, page, a.GetProperty("browser_download_url").GetString(), a.GetProperty("size").GetInt64(), sha);
+            string? sha = pick.TryGetProperty("digest", out var d) && d.GetString() is string ds && ds.StartsWith("sha256:") ? ds[7..] : null;
+            return new Release(ver, tag, page, pick.GetProperty("browser_download_url").GetString(), pick.GetProperty("size").GetInt64(), sha);
         }
         return new Release(ver, tag, page, null, 0, null);
     }
@@ -98,12 +102,12 @@ static class Updater
     }
 
     /// <summary>새 버전을 설치 모드로 실행 (지금 버전은 이 다음에 종료해야 함).</summary>
-    public static void Launch(string newDir)
+    public static void Launch(string newDir, string tag)
     {
         string target = App.Dir.TrimEnd(Path.DirectorySeparatorChar);
         Process.Start(new ProcessStartInfo(Path.Combine(newDir, "ShopHelper.exe"))
         {
-            ArgumentList = { "--install-update", target, Environment.ProcessId.ToString(), App.Version },
+            ArgumentList = { "--install-update", target, Environment.ProcessId.ToString(), App.Version, tag },
             UseShellExecute = false,
             WorkingDirectory = newDir,
         });
@@ -113,7 +117,7 @@ static class Updater
     /// "--install-update 설치폴더 pid": 새 버전(임시 폴더)에서 실행됨. 이전 버전이 끝나길 기다린 뒤
     /// 자기 파일을 설치 폴더에 복사하고 그 자리에서 다시 시작.
     /// </summary>
-    public static int InstallHere(string target, int pid, string? fromVersion = null)
+    public static int InstallHere(string target, int pid, string? fromVersion = null, string? tag = null)
     {
         App.Log($"업데이트 설치: {App.Dir} → {target} (이전 pid {pid})");
         try
@@ -133,7 +137,11 @@ static class Updater
                 }
             }
             var start = new ProcessStartInfo(Path.Combine(target, "ShopHelper.exe")) { UseShellExecute = false, WorkingDirectory = target };
-            if (fromVersion != null) { start.ArgumentList.Add("--updated-from"); start.ArgumentList.Add(fromVersion); }   // 다시 켜지면 '완료' 표시
+            if (fromVersion != null)
+            {
+                start.ArgumentList.Add("--updated-from"); start.ArgumentList.Add(fromVersion);   // 다시 켜지면 '완료' 표시
+                if (tag != null) start.ArgumentList.Add(tag);
+            }
             Process.Start(start);
             return 0;
         }
