@@ -9,10 +9,10 @@ namespace ShopHelper;
 /// </summary>
 sealed class Overlay
 {
-    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3;
+    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4;
     const uint KEY = 0x010101;
     static readonly uint Green = Rgb(46, 204, 113), Red = Rgb(231, 76, 60), Gray = Rgb(149, 165, 166),
-        Yellow = Rgb(241, 196, 15), White = Rgb(230, 230, 230), Panel = Rgb(27, 27, 27);
+        Yellow = Rgb(241, 196, 15), White = Rgb(230, 230, 230), PanelBg = Rgb(27, 27, 27);
 
     readonly Config cfg;
     public Engine? Engine;
@@ -49,6 +49,20 @@ sealed class Overlay
         PostMessageW(hwnd, MSG_UPDATE, IntPtr.Zero, IntPtr.Zero);
     }
 
+    (PanelState st, (int X, int Y, int W, int H) r, int ver) panelWant, panelSent = ((PanelState)(-1), default, -1);
+
+    /// <summary>상점 안 시세 창 상태 (엔진 스레드). 바뀔 때만 UI 스레드로 보냄.</summary>
+    public void Panel(PanelState st, (int X, int Y, int W, int H) r, int ver)
+    {
+        lock (gate)
+        {
+            panelWant = (st, r, ver);
+            if (panelWant == panelSent) return;
+            panelSent = panelWant;
+        }
+        PostMessageW(msgWnd, MSG_PANEL, IntPtr.Zero, IntPtr.Zero);
+    }
+
     public void Notify(string title, string text)
     {
         lock (gate) { notifyTitle = title; notifyText = text; }
@@ -70,7 +84,7 @@ sealed class Overlay
         ec.hCursor = LoadCursorW(IntPtr.Zero, new IntPtr(32512));
         RegisterClassExW(ref ec);
         keyBrush = CreateSolidBrush(KEY);
-        panelBrush = CreateSolidBrush(Panel);
+        panelBrush = CreateSolidBrush(PanelBg);
 
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
@@ -83,6 +97,7 @@ sealed class Overlay
         AddTray();
         if (!RegisterHotKey(msgWnd, 1, 0x2 | 0x4 | 0x4000, 0x50)) App.Log("단축키 Ctrl+Shift+P 등록 실패 (다른 프로그램이 사용 중)");
         editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
+        editor.Init("ShopHelperEditor", inst);
         onReady();
 
         while (GetMessageW(out var m, IntPtr.Zero, 0, 0) > 0)
@@ -120,7 +135,7 @@ sealed class Overlay
         const uint CHECKED = 0x8, GRAYED = 0x1, SEP = 0x800;
         AppendMenuW(menu, GRAYED, UIntPtr.Zero, Engine?.LogInfo ?? "");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, 0, (UIntPtr)7, "시세 바로 바꾸기...  (Ctrl+Shift+P)");
+        AppendMenuW(menu, 0, (UIntPtr)7, "시세 입력...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, cfg.Resell ? CHECKED : 0, (UIntPtr)2, "결정화 기준 (팔아서 결정, 수수료 반영)");
         AppendMenuW(menu, cfg.Resell ? 0 : CHECKED, (UIntPtr)1, "직접 사용 기준 (시세)");
@@ -155,7 +170,7 @@ sealed class Overlay
 
     void OpenEditor()
     {
-        try { editor?.Open("ShopHelperEditor", inst); }
+        try { editor?.OpenTray(); }
         catch (Exception e) { App.Log("시세 창 오류: " + e); }
     }
 
@@ -198,6 +213,16 @@ sealed class Overlay
                     int ev = (int)(l.ToInt64() & 0xFFFF);
                     if (ev == WM_LBUTTONDBLCLK) OpenEditor();
                     else if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU) TrayMenu();
+                    return IntPtr.Zero;
+                case MSG_PANEL:
+                    (PanelState st, (int X, int Y, int W, int H) pr, int ver) want;
+                    lock (gate) want = panelWant;
+                    if (editor != null)
+                    {
+                        if (want.st == PanelState.Visible) editor.ShowInShop(want.pr);
+                        else if (want.st == PanelState.Hidden) editor.HideInShop();
+                        else editor.CloseShop();
+                    }
                     return IntPtr.Zero;
                 case MSG_NOTIFY:
                     ShowBalloon();
@@ -311,7 +336,7 @@ sealed class Overlay
         };
         if (s.Pages > 0)
             lines.Add($"본 화면 {s.Pages}개 · 평균 이득 {Gain(s.SumGain / s.Pages)} / 새로고침 {(cfg.RefreshCost / crystal):0.##}결");
-        if (s.LatencyMs is double ms) lines.Add($"반영 {ms:0}ms   ·   시세 바꾸기 Ctrl+Shift+P");
+        if (s.LatencyMs is double ms) lines.Add($"반영 {ms:0}ms");
         if (s.Status.Length > 0) lines.Add(s.Status);
         string text = string.Join("\n", lines);
         if (s.Refresh is Box rb)

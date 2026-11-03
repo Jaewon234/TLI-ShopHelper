@@ -75,6 +75,8 @@ static class App
     }
 }
 
+enum PanelState { Off, Hidden, Visible }
+
 /// <summary>화면 감시 + 추적 스레드.</summary>
 sealed class Engine
 {
@@ -96,6 +98,7 @@ sealed class Engine
     public void Start() => new Thread(Run) { IsBackground = true, Name = "engine" }.Start();
     public void Reevaluate() { reevaluate = true; wake.Set(); }
     volatile List<string> unknown = new();
+    int unknownVer;
     public List<string> UnknownNames() => unknown;
     public void RequestSave() { saveRequested = true; wake.Set(); }
 
@@ -149,6 +152,7 @@ sealed class Engine
             }
             if (!shopOpen)
             {
+                overlay.Panel(PanelState.Off, default, 0);
                 if (shown) { overlay.Hide(); shown = false; }
                 wake.WaitOne(200);
                 continue;
@@ -163,12 +167,14 @@ sealed class Engine
             if (rect != null && fg != hwnd && fg != IntPtr.Zero && fg == overlay.EditorHwnd)
             {
                 // 시세 입력 창을 쓰는 동안: 화면 추적은 멈추고 결과만 계속 보여줌
+                overlay.Panel(PanelState.Visible, rect.Value, unknownVer);
                 if (!shown) { overlay.Show(rect.Value, tracker.Snap()); shown = true; }
                 wake.WaitOne(60);
                 continue;
             }
             if (rect == null || fg != hwnd)
             {
+                overlay.Panel(PanelState.Hidden, default, 0);
                 if (shown) { overlay.Hide(); shown = false; }
                 Thread.Sleep(60);
                 continue;
@@ -177,7 +183,13 @@ sealed class Engine
             var rows = tracker.Rows;
             var frame = rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
             bool dirty = tracker.Update(frame, now);
-            if (dirty) unknown = tracker.UnknownNames();
+            if (dirty)
+            {
+                var un = tracker.UnknownNames();
+                if (!un.SequenceEqual(unknown)) unknownVer++;
+                unknown = un;
+            }
+            overlay.Panel(PanelState.Visible, rect.Value, unknownVer);
             if (dirty || !shown || overlay.RectChanged(rect.Value))
             {
                 overlay.Show(rect.Value, tracker.Snap());
