@@ -7,6 +7,11 @@
 - 게임 메모리를 읽거나 입력을 보내지 않음. 로그 파일(`UE_game.log`)과 화면 캡처만 사용
 - 게임은 창 모드 / 테두리 없는 창 모드
 
+## 다운로드
+[Releases](../../releases/latest) 에서 `ShopHelper.zip` 을 받아 압축을 풀고 `ShopHelper.exe` 실행.
+
+새 버전은 `v1.0.1` 처럼 `v` 로 시작하는 태그를 올리면 GitHub Actions 가 자동으로 빌드해서 Releases 에 올립니다.
+
 ## 동작
 1. `UE_game.log` 끝을 30ms 간격으로 읽어 `OpenView GroceryStoreV3` / `CloseView …_GroceryStoreV3Ctrl` 로 켜고 끔
    (로그 위치는 스팀 레지스트리 → `libraryfolders.vdf` → 실행 중인 게임 exe 순서로 자동 검색)
