@@ -131,7 +131,8 @@ static class Updater
             {
                 string rel = Path.GetRelativePath(src, file);
                 // 사용자 데이터(시세·설정·로그)는 절대 덮어쓰지 않음
-                if (App.UserFiles.Any(u => rel.Equals(u, StringComparison.OrdinalIgnoreCase))) continue;
+                string top = rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)[0];
+                if (App.UserFiles.Any(u => top.Equals(u, StringComparison.OrdinalIgnoreCase))) continue;
                 string dst = Path.Combine(target, rel);
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
                 for (int attempt = 0; ; attempt++)

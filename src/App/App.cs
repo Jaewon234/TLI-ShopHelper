@@ -8,19 +8,24 @@ static class App
 {
     public static readonly string Dir = AppContext.BaseDirectory;
     /// <summary>
-    /// 시세·설정은 ShopHelper.exe 와 같은 폴더에 저장 (폴더째 다른 PC 로 옮기면 시세도 같이 감).
-    /// 자동 업데이트는 exe 와 안내 파일만 바꾸고 prices.json / settings.json 은 건드리지 않음.
+    /// 사용자 데이터는 ShopHelper.exe 와 같은 폴더 아래에 모아 둠 (폴더째 다른 PC 로 옮기면 시세도 같이 감).
+    ///   설정\prices.json, 설정\settings.json · 캡처\ · 문제확인\ · helper.log
+    /// 자동 업데이트는 exe 와 안내 파일만 바꾸고 이것들은 건드리지 않음.
     /// 폴더에 쓸 수 없을 때만 (예: Program Files) 예전처럼 %AppData%\ShopHelper 에 저장.
     /// </summary>
     public static readonly string OldDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopHelper");
-    public static readonly string DataDir = CanWrite(Dir) ? Dir : OldDataDir;
+    static readonly bool Portable = CanWrite(Dir);
+    /// <summary>캡처 폴더들이 들어가는 곳</summary>
+    public static readonly string DataDir = Portable ? Dir : OldDataDir;
+    /// <summary>시세·설정 json 이 들어가는 폴더</summary>
+    public static readonly string ConfDir = Portable ? Path.Combine(Dir, "설정") : OldDataDir;
     /// <summary>시세만 (업데이트해도 절대 바뀌지 않음)</summary>
-    public static readonly string PricesPath = Path.Combine(DataDir, "prices.json");
+    public static readonly string PricesPath = Path.Combine(ConfDir, "prices.json");
     /// <summary>그 밖의 설정</summary>
-    public static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
+    public static readonly string SettingsPath = Path.Combine(ConfDir, "settings.json");
     static readonly string[] LegacyConfigs = { Path.Combine(Dir, "config.json"), Path.Combine(OldDataDir, "config.json") };
-    /// <summary>업데이트가 덮어쓰면 안 되는 파일 (사용자 데이터)</summary>
-    public static readonly string[] UserFiles = { "prices.json", "settings.json", "config.json", "helper.log" };
+    /// <summary>업데이트가 덮어쓰면 안 되는 것 (사용자 데이터: 파일 이름 또는 폴더 이름)</summary>
+    public static readonly string[] UserFiles = { "prices.json", "settings.json", "config.json", "helper.log", "설정", "캡처", "문제확인" };
 
     static bool CanWrite(string dir)
     {
@@ -36,17 +41,25 @@ static class App
 
     public static Config LoadConfig()
     {
-        Directory.CreateDirectory(DataDir);
-        // 예전 버전(%AppData%\ShopHelper)에 저장된 시세를 exe 폴더로 옮겨 옴 (원본은 백업으로 남김)
-        if (!string.Equals(Path.GetFullPath(DataDir).TrimEnd('\\', '/'), Path.GetFullPath(OldDataDir).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase)
-            && !File.Exists(PricesPath))
+        Directory.CreateDirectory(ConfDir);
+        if (Portable && !File.Exists(PricesPath))
         {
+            // v1.7.6: exe 옆에 바로 저장한 json → 설정 폴더로 옮김
+            // 그 전 버전: %AppData%\ShopHelper 에 저장한 json → 복사 (원본은 백업으로 남김)
+            bool moved = false;
             foreach (var name in new[] { "prices.json", "settings.json" })
             {
-                var from = Path.Combine(OldDataDir, name);
-                try { if (File.Exists(from)) { File.Copy(from, Path.Combine(DataDir, name)); Log($"예전 {name} 을 exe 폴더로 옮겨 옴: {from}"); } }
+                var from = Path.Combine(Dir, name);
+                try { if (File.Exists(from)) { File.Move(from, Path.Combine(ConfDir, name), overwrite: true); moved = true; Log($"{name} 을 설정 폴더로 옮김"); } }
                 catch (Exception e) { Log($"{name} 옮기기 실패: " + e.Message); }
             }
+            if (!moved)
+                foreach (var name in new[] { "prices.json", "settings.json" })
+                {
+                    var from = Path.Combine(OldDataDir, name);
+                    try { if (File.Exists(from)) { File.Copy(from, Path.Combine(ConfDir, name)); Log($"예전 {name} 을 설정 폴더로 가져옴: {from}"); } }
+                    catch (Exception e) { Log($"{name} 가져오기 실패: " + e.Message); }
+                }
         }
         var c = Config.LoadSplit(SettingsPath, PricesPath, LegacyConfigs);
         ConfigSaved();
@@ -138,7 +151,7 @@ static class App
         Updater.Cleanup();
         Config cfg;
         try { cfg = LoadConfig(); Log("시세 파일: " + PricesPath); }
-        catch (Exception e) { Error("시세/설정 파일을 읽을 수 없습니다:\n" + e.Message + "\n\n" + DataDir); return 1; }
+        catch (Exception e) { Error("시세/설정 파일을 읽을 수 없습니다:\n" + e.Message + "\n\n" + ConfDir); return 1; }
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
         TidyShots();
