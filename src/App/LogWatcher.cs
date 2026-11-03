@@ -20,6 +20,10 @@ sealed class LogWatcher
 
     public LogWatcher(string path, Action<bool> onChange) { this.path = path; this.onChange = onChange; }
 
+    volatile bool stopped;
+    public string FilePath => path;
+    public void Stop() => stopped = true;
+
     public void Start() => new Thread(Run) { IsBackground = true, Name = "log" }.Start();
 
     static FileStream OpenShared(string p) =>
@@ -48,9 +52,10 @@ sealed class LogWatcher
     void Run()
     {
         long pos = InitialState();
+        if (stopped) return;
         onChange(IsOpen);
         var pending = new List<byte>();
-        while (true)
+        while (!stopped)
         {
             try
             {
@@ -82,6 +87,7 @@ sealed class LogWatcher
 
     void Handle(string line)
     {
+        if (stopped) return;
         if (IsOpen && OnView != null)
         {
             var mo = AnyOpen.Match(line);

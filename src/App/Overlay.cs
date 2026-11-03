@@ -9,7 +9,7 @@ namespace ShopHelper;
 /// </summary>
 sealed class Overlay
 {
-    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5, MSG_INSTALL = WM_APP + 6, MSG_SAVE = WM_APP + 7;
+    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5, MSG_INSTALL = WM_APP + 6, MSG_SAVE = WM_APP + 7, MSG_UI = WM_APP + 8;
     // 색 (ARGB)
     static readonly uint Green = Canvas.Argb(255, 34, 197, 94), Red = Canvas.Argb(255, 239, 68, 68),
         Amber = Canvas.Argb(255, 245, 158, 11), Muted = Canvas.Argb(255, 150, 155, 165), Dim = Canvas.Argb(255, 110, 115, 125),
@@ -243,7 +243,7 @@ sealed class Overlay
             if (r.Tag == cfg.SkipUpdateTag && r.Tag.Length > 0)
             {
                 App.Log($"업데이트 확인: {r.Tag} 는 예전에 받아 보니 실제 버전이 오르지 않아 건너뜀");
-                if (manual) Info($"최신 릴리스 {r.Tag} 는 실제로는 새 버전이 아니라서 건너뜁니다.\n(태그를 잘못 붙인 릴리스일 수 있어요)\n\n지금 v{App.Version}");
+                if (manual) Message("최신 버전입니다", $"릴리스 {r.Tag} 는 실제로 새 버전이 아니라 건너뜁니다 · 지금 v{App.Version}", done: true, autoCloseMs: 3000);
             }
             else if (r.Ver > Updater.Current)
             {
@@ -252,24 +252,39 @@ sealed class Overlay
                 if (manual)
                 {
                     // 직접 누른 확인은 알림 대신 창으로 (알림이 꺼져 있어도 보이게)
-                    if (Ask($"새 버전 {r.Tag} 이 있습니다. (지금 v{App.Version})\n\n지금 설치할까요? 시세는 그대로 유지됩니다."))
-                        PostMessageW(msgWnd, MSG_INSTALL, IntPtr.Zero, IntPtr.Zero);
+                    Message($"새 버전 {r.Tag} 이 있습니다", $"지금 v{App.Version} · 설치해도 시세는 그대로 유지됩니다.",
+                        buttons: new[] { "설치", "나중에" }, onButton: i => { if (i == 0) StartInstall(); });
                 }
                 else Notify($"새 버전 {r.Tag} 이 있습니다", "이 알림을 누르거나 트레이 메뉴 > 업데이트 를 누르세요. 시세는 그대로 유지됩니다.");
             }
-            else if (manual) Info($"최신 버전입니다.\n\n지금 v{App.Version} · GitHub 최신 {r.Tag}");
+            else if (manual) Message("최신 버전입니다", $"지금 v{App.Version} · GitHub 최신 {r.Tag}", done: true, autoCloseMs: 2000);
         }
         catch (Exception e)
         {
             App.Log("업데이트 확인 실패: " + e.Message);
             if (manual)
-                Info("업데이트를 확인하지 못했습니다.\n\n" + e.Message +
-                     $"\n\n확인하는 곳: github.com/{cfg.UpdateRepo}\n(저장소가 비공개면 로그인 없이 볼 수 없어 확인이 안 됩니다)");
+                Message("업데이트를 확인하지 못했습니다", Short(e.Message) + $"\n확인하는 곳: github.com/{cfg.UpdateRepo}", failed: true);
         }
     }
 
-    static void Info(string text) => MessageBoxW(IntPtr.Zero, text, "신들의 강복 도우미 · 업데이트", 0x40 | 0x40000 | 0x10000);
-    static bool Ask(string text) => MessageBoxW(IntPtr.Zero, text, "신들의 강복 도우미 · 업데이트", 0x4 | 0x20 | 0x40000 | 0x10000) == 6;
+    static string Short(string s) { s = s.Replace("\r", " ").Replace("\n", " "); return s.Length > 60 ? s[..57] + "..." : s; }
+
+    readonly Queue<Action> uiQueue = new();
+    /// <summary>아무 스레드에서나: UI 스레드에서 실행.</summary>
+    void OnUi(Action a)
+    {
+        lock (uiQueue) uiQueue.Enqueue(a);
+        PostMessageW(msgWnd, MSG_UI, IntPtr.Zero, IntPtr.Zero);
+    }
+
+    /// <summary>소리 없는 업데이트 알림 창 (진행 창과 같은 모양). 아무 스레드에서나.</summary>
+    void Message(string stage, string detail, bool failed = false, bool done = false,
+        string[]? buttons = null, Action<int>? onButton = null, int autoCloseMs = 0) =>
+        OnUi(() =>
+        {
+            if (installing) return;   // 설치 진행 창을 덮지 않게
+            progress.ShowMessage("ShopHelperProgress", inst, "업데이트 확인", stage, detail, failed, done, buttons, onButton, autoCloseMs);
+        });
 
     void StartInstall()
     {
@@ -446,6 +461,15 @@ sealed class Overlay
                         else editor.CloseShop();
                     }
                     Render(); // 이익 카드를 시세 창 위로 옮김
+                    return IntPtr.Zero;
+                case MSG_UI:
+                    while (true)
+                    {
+                        Action? a;
+                        lock (uiQueue) a = uiQueue.Count > 0 ? uiQueue.Dequeue() : null;
+                        if (a == null) break;
+                        a();
+                    }
                     return IntPtr.Zero;
                 case MSG_INSTALL:
                     StartInstall();

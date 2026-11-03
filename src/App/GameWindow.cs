@@ -90,7 +90,7 @@ static class GameWindow
         }
     }
 
-    static string? FromSteam()
+    static IEnumerable<string> FromSteam()
     {
         foreach (var lib in SteamLibraries())
         {
@@ -100,12 +100,12 @@ static class GameWindow
                 if (Path.GetFileName(d).Contains("torchlight", StringComparison.OrdinalIgnoreCase))
                 {
                     var p = Path.Combine(d, LogRel);
-                    if (File.Exists(p)) return p;
+                    if (File.Exists(p)) yield return p;
                 }
         }
-        return null;
     }
 
+    /// <summary>실행 중인 게임 exe 위치에서 로그 찾기. 게임이 꺼져 있으면 null.</summary>
     static string? FromProcess(Config cfg)
     {
         var h = Find(cfg);
@@ -119,12 +119,27 @@ static class GameWindow
         return null;
     }
 
+    static DateTime Mtime(string p) { try { return File.GetLastWriteTimeUtc(p); } catch { return DateTime.MinValue; } }
+
+    /// <summary>
+    /// 로그 고르기: 설정에 적은 경로 → 실행 중인 게임의 로그 → (게임이 꺼져 있으면) 후보 중 가장 최근에 수정된 로그.
+    /// 스팀 라이브러리가 여러 개라 옛 설치 폴더의 로그가 남아 있어도 엉뚱한 걸 잡지 않음.
+    /// </summary>
     public static (string? path, string how) FindLog(Config cfg)
     {
         if (!string.IsNullOrWhiteSpace(cfg.LogPath) && cfg.LogPath != "auto" && File.Exists(cfg.LogPath))
-            return (cfg.LogPath, "config.json");
-        try { var p = FromSteam(); if (p != null) return (p, "스팀 라이브러리"); } catch (Exception e) { App.Log("스팀 검색 오류: " + e.Message); }
+            return (cfg.LogPath, "설정 파일");
         try { var p = FromProcess(cfg); if (p != null) return (p, "실행 중인 게임"); } catch (Exception e) { App.Log("프로세스 검색 오류: " + e.Message); }
+        try
+        {
+            var all = FromSteam().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (all.Count > 0)
+            {
+                var best = all.OrderByDescending(Mtime).First();
+                return (best, all.Count > 1 ? $"스팀 라이브러리, 후보 {all.Count}개 중 최근 것" : "스팀 라이브러리");
+            }
+        }
+        catch (Exception e) { App.Log("스팀 검색 오류: " + e.Message); }
         return (null, "");
     }
 }

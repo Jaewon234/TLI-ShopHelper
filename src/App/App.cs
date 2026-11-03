@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.2";
+    public const string Version = "1.7.3";
 
     [STAThread]
     static int Main(string[] args)
@@ -180,20 +180,28 @@ sealed class Engine
         wake.Set();
     }
 
+    /// <summary>로그를 찾고, 3초마다 다시 확인해서 더 맞는 로그(게임을 켰거나 다른 폴더 로그가 갱신됨)가 생기면 갈아탐.</summary>
     void FindLogLoop()
     {
+        LogWatcher? cur = null;
+        bool notified = false;
         while (true)
         {
             var (path, how) = GameWindow.FindLog(cfg);
-            if (path != null)
+            if (path != null && (cur == null || !string.Equals(Path.GetFullPath(cur.FilePath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)))
             {
-                App.Log($"로그: {path} ({how})");
+                if (cur != null) { App.Log($"로그 바꿈: {cur.FilePath} → {path} ({how})"); cur.Stop(); }
+                else App.Log($"로그: {path} ({how})");
                 LogInfo = $"로그 연결됨 ({how})";
-                overlay.Notify("신들의 강복 도우미 실행 중", $"로그를 찾았습니다 ({how}).\n상점을 열면 자동으로 켜집니다.");
-                new LogWatcher(path, OnShop) { OnView = OnView }.Start();
-                return;
+                if (!notified)
+                {
+                    notified = true;
+                    overlay.Notify("신들의 강복 도우미 실행 중", $"로그를 찾았습니다 ({how}).\n상점을 열면 자동으로 켜집니다.");
+                }
+                cur = new LogWatcher(path, OnShop) { OnView = OnView };
+                cur.Start();
             }
-            LogInfo = "로그를 못 찾음 · 게임을 켜면 다시 찾습니다";
+            else if (path == null && cur == null) LogInfo = "로그를 못 찾음 · 게임을 켜면 다시 찾습니다";
             Thread.Sleep(3000);
         }
     }
