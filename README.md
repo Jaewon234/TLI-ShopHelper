@@ -10,7 +10,7 @@
 ## 다운로드
 [Releases](../../releases/latest) 에서 `ShopHelper.zip` 을 받아 압축을 풀고 `ShopHelper.exe` 실행.
 
-새 버전은 `v1.0.1` 처럼 `v` 로 시작하는 태그를 올리면 GitHub Actions 가 자동으로 빌드해서 Releases 에 올립니다.
+빌드는 로컬에서 하고(GitHub Actions 미사용), 릴리스에는 zip 만 직접 올립니다.
 
 ## 동작
 1. `UE_game.log` 끝을 30ms 간격으로 읽어 `OpenView GroceryStoreV3` / `CloseView …_GroceryStoreV3Ctrl` 로 켜고 끔
