@@ -153,7 +153,7 @@ static class T
             tr.Reset(0, 0);
             sw.Restart();
             double t = 0;
-            for (int i = 0; i < 40; i++, t += 50) { tr.Update(f, t); if (i > 2 && tr.Snap().Slots.All(x => !x.Pending)) break; }
+            for (int i = 0; i < 40; i++, t += 50) { tr.Update(f, t); if (i > 2 && tr.Snap().Slots.Count > 0 && tr.Snap().Slots.All(x => !x.Pending)) break; }
             Console.WriteLine($"== {Path.GetFileName(file)} {w}x{h} · 처리 {sw.ElapsedMilliseconds}ms");
             Console.Write(Parser.Describe(tr.Snap().Slots.Select(x => x.Card), cfg));
             var d0 = tr.Snap().Slots[0].D; Console.WriteLine($"    첫 칸 테두리: x {d0.X1:0}~{d0.X2:0}, y {d0.Y1:0}~{d0.Y2:0}");
@@ -202,7 +202,7 @@ static class T
 
         Console.WriteLine("[2] 추적기: 첫 스캔");
         ocr = new FakeOcr();
-        var tr = new Tracker(ocr, cfg) { Log = m => Console.WriteLine("    log: " + m) };
+        var tr = new Tracker(ocr, cfg) { Log = m => Console.WriteLine("    log: " + m), RelayoutMs = 0 };
         double now = 0; tr.Reset(now);
         Run(tr, ocr, Scene.Make(NamesA, PricesA), ref now);
         var snap = tr.Snap();
@@ -322,9 +322,9 @@ static class T
         var p8 = (string[])p6.Clone(); p8[4] = "588";
         var ocr8 = new FakeOcr { MisreadOnce = new() { ["588"] = "432" } };
         var cfg8 = new Config { CrystalRate = 50, RereadSec = 1 };
-        var tr8 = new Tracker(ocr8, cfg8) { Log = m => Console.WriteLine("    log: " + m) };
+        var tr8 = new Tracker(ocr8, cfg8) { Log = m => Console.WriteLine("    log: " + m), RelayoutMs = 0 };
         double t8 = 0; tr8.Reset(t8);
-        Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 12);   // 첫 스캔 (0.25초 뒤)
+        Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 22);   // 첫 스캔 (0.25초 + 화면이 0.3초 멈춘 뒤)
         Check(tr8.Snap().Slots[4].Card?.Price == 432, "처음엔 432 로 잘못 읽음");
         Run(tr8, ocr8, Scene.Make(n6, p8), ref t8, 40);   // 1.2초
         Check(tr8.Snap().Slots[4].Card?.Price == 588 && tr8.Snap().Slots[4].Card?.Status == Verdict.Bad, "1초 뒤 588 로 고쳐 손해로 표시");
@@ -362,6 +362,20 @@ static class T
         var (mc, _) = Parser.Analyze(mocr.Recognize(new Frame(1, 1), new Box(0, 0, 1920, 1080), 1), cfg);
         Check(mc.Count == 8 && mc.Select(c => c.Price).SequenceEqual(new[] { 66, 77, 13, 12, 107, 390, 56, 200 }), $"8칸·가격 정상 - {string.Join(",", mc.Select(c => c.Price))}");
         Check(Parser.IsOverlayText("+3.96결") && Parser.IsOverlayText("-0.38결") && Parser.IsOverlayText("구매") && !Parser.IsOverlayText("결정") && !Parser.IsOverlayText("최초의불꽃"), "오버레이 글자 판별");
+
+        Console.WriteLine("[5f] 상점이 열리며 카드가 움직이는 동안에는 칸 위치를 잡지 않음");
+        var ocrA = new FakeOcr(); var trA = new Tracker(ocrA, cfg); double tA = 0; trA.Reset(tA);
+        for (int i = 0; i < 20; i++)   // 0.6초 동안 카드가 오른쪽에서 밀려 들어옴
+        {
+            var moving = Scene.Make(NamesA, PricesA);
+            double dx = (20 - i) * 6;
+            moving.Items = moving.Items.Select(t => t.B.Y1 > 150 && t.B.Y1 < 300 ? t with { B = t.B.Offset(dx, 0) } : t).ToList();
+            ocrA.Scene = moving; trA.Update(moving.Render(), tA); tA += 30;
+        }
+        Run(trA, ocrA, Scene.Make(NamesA, PricesA), ref tA, 20);
+        var sA = trA.Snap();
+        Check(sA.Slots.Count == 8 && Math.Abs(sA.Slots[0].R.Cx - 443) < 4 && Math.Abs(sA.Slots[7].R.Cx - 1372) < 4,
+              $"멈춘 뒤의 위치로 잡음 (첫 칸 {sA.Slots[0].R.Cx:0}, 끝 칸 {sA.Slots[7].R.Cx:0})");
 
         Console.WriteLine("[6] 시세 모드 변경 후 재평가");
         cfg.Mode = "resell"; tr.Reevaluate();

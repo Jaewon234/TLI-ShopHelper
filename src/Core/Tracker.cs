@@ -147,15 +147,22 @@ public sealed class Tracker
     static string Describe1(Card? c) => c == null ? "(없음)" : c.Sold ? $"{c.Name} 매진" : $"{c.Name} x{c.Qty} {c.Price}휘";
 
     /// <summary>칸 위치를 알면 그 줄 범위만 캡처하면 됨 (null 이면 전체).</summary>
-    public (int From, int To)? Rows => slots == null || slots.Count == 0 ? null
+    public (int From, int To)? Rows => slots == null || slots.Count == 0 || needFull ? null
         : ((int)slots.Min(s => s.R.Y1) - 2, (int)slots.Max(s => s.R.Y2) + 3);
 
     public Tracker(IOcr ocr, Config cfg) { this.ocr = ocr; this.cfg = cfg; }
 
     /// <summary>상점이 새로 열릴 때. 칸 위치는 다시 찾지만 그림 기억(cache)은 유지.</summary>
+    byte[]? openFp;
+    double openStableSince, openWaitStart, relayoutAt = -1;
+    bool needFull, firstLayout;
+    /// <summary>처음 칸을 잡고 몇 ms 뒤에 위치를 한 번 더 확인할지 (0 = 안 함)</summary>
+    public double RelayoutMs = 2000;
+
     public void Reset(double now, double delayMs = 250)
     {
         slots = null; refresh = null; batchStart = null; lastSig = null;
+        openFp = null; needFull = false; relayoutAt = -1; firstLayout = true;
         nextFullScan = now + delayMs;
         Status = "칸 찾는 중";
     }
@@ -175,12 +182,35 @@ public sealed class Tracker
             frameW = f.W; frameH = f.H;
             slots = null;
         }
-        if (slots == null)
+        if (slots == null || needFull)
         {
             if (now < nextFullScan) return false;
+            if (slots == null)
+            {
+                // 상점이 열릴 때 카드가 움직이며 나타나므로, 화면이 0.3초 멈춘 뒤에 칸 위치를 잡음 (최대 2초 기다림)
+                var ofp = Fingerprint.Make(f, new Box(0, 0, f.W, f.H * 0.6));
+                if (openFp == null) openWaitStart = now;
+                if (openFp == null || Fingerprint.DiffCells(ofp, openFp) > Fingerprint.Cells(ofp) / 200)
+                {
+                    openFp = ofp; openStableSince = now;
+                    if (now - openWaitStart < 2000) return false;
+                }
+                if (now - openStableSince < 300 && now - openWaitStart < 2000) return false;
+            }
+            else Log?.Invoke("칸 위치 다시 확인");
+            needFull = false;
+            var swScan = System.Diagnostics.Stopwatch.StartNew();
             FullScan(f, now);
+            // 처음 읽기가 빨랐으면(1초 미만) 2초 뒤 한 번 더 위치를 확인 (애니메이션 중에 잡혔을 수 있음)
+            relayoutAt = firstLayout && RelayoutMs > 0 && swScan.ElapsedMilliseconds < 1000 ? now + RelayoutMs : -1;
+            firstLayout = false;
             lastRescan = now;
             return true;
+        }
+        if (relayoutAt > 0 && now >= relayoutAt && slots.All(s => !s.Pending))
+        {
+            relayoutAt = -1; needFull = true;   // 다음 프레임은 화면 전체를 받아서 다시 잡음 (Rows = null)
+            return false;
         }
 
         bool dirty = false;

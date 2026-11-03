@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.6.9";
+    public const string Version = "1.6.10";
 
     [STAThread]
     static int Main(string[] args)
