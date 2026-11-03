@@ -106,7 +106,7 @@ public sealed class Config
         new() { Name = "절대자 엠버", Price = 20.5 },
         Gamble("소", 50, 350),
         Gamble("중", null, null),
-        Gamble("대", null, null),
+        Gamble("대", 100, 900),
     };
 
     /// <summary>신비의 휘석(소/중/대): 휘석을 랜덤으로 주는 도박. 평균은 따로 안 주면 (최소+최대)/2.</summary>
@@ -157,11 +157,17 @@ public sealed class Config
             changed = true;
         }
         // 신비의 휘석(소/중/대)는 도박 항목
-        foreach (var d in new[] { Gamble("소", 50, 350), Gamble("중", null, null), Gamble("대", null, null) })
+        foreach (var d in DefaultItems().Where(i => i.IsGamble))
         {
             var g = Items.FirstOrDefault(i => i.Name.Replace(" ", "") == d.Name.Replace(" ", ""));
             if (g == null) { Items.Add(d); changed = true; }
-            else if (!g.IsGamble) { g.Kind = d.Kind; g.Taxed = false; g.GambleMin ??= d.GambleMin; g.GambleMax ??= d.GambleMax; g.Price = null; changed = true; }
+            else
+            {
+                if (!g.IsGamble) { g.Kind = d.Kind; g.Taxed = false; g.Price = null; changed = true; }
+                // 새 버전에서 범위를 알게 된 도박은 비어 있을 때만 채움 (직접 넣은 값은 그대로)
+                if (g.GambleMin == null && d.GambleMin != null) { g.GambleMin = d.GambleMin; changed = true; }
+                if (g.GambleMax == null && d.GambleMax != null) { g.GambleMax = d.GambleMax; changed = true; }
+            }
         }
         if (!Items.Any(i => i.IsCrystal)) { Items.Insert(0, new ItemDef { Name = "최초의 불꽃 결정", Price = 1, Taxed = false }); changed = true; }
         // 새 버전에서 기본 항목이 늘어나면 없는 것만 추가 (입력해 둔 시세는 그대로)

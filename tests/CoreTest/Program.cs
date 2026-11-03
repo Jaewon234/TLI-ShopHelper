@@ -259,6 +259,12 @@ static class T
         Check(g200.Status == Verdict.Gamble && g200.Diff == 0 && g200.RangeLo == -150 && g200.RangeHi == 150, "200휘석: 기대 0, -150~+150");
         Check(g150.Status == Verdict.Good && g150.Diff == 50, "150휘석: 기대 +50 → 구매");
 
+        Card GL(int price) { var c = new Card { Name = "신비의휘석(대)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }
+        var gl = GL(500);
+        Check(gl.Status == Verdict.Gamble && gl.Diff == 0 && gl.RangeLo == -400 && gl.RangeHi == 400, "대 500휘석: 기대 0, -400~+400 (100~900)");
+        var oldG = new Config(); oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMin = null; oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMax = null;
+        Check(oldG.Migrate() && oldG.Items.Single(i => i.Name == "신비의 휘석(대)").GambleMax == 900, "예전 prices.json 의 빈 범위를 100~900 으로 채움");
+
         Console.WriteLine("[9] 예전 설정(1개당 휘석) 자동 변환");
         var old = new Config { PriceUnit = "", Items = new() {
             new() { Name = "최초의 불꽃 결정", Price = 50, Taxed = false }, new() { Name = "이계의 메아리", Price = 5.5 },
