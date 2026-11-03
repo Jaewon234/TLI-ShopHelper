@@ -34,8 +34,15 @@ dotnet publish src/App/ShopHelper.csproj -c Release -o out
 ```
 Linux에서도 Windows용 exe를 빌드할 수 있습니다 (`EnableWindowsTargeting`, WinForms/WPF 미사용).
 
-## 설정 (`%AppData%\ShopHelper\config.json`)
-업데이트할 때 zip 을 덮어써도 시세가 유지되도록 프로그램 폴더 밖에 저장합니다. 배포 zip 에는 config.json 을 넣지 않습니다.
+## 설정 (`%AppData%\ShopHelper\`)
+- `prices.json`: 시세만 (1개당 결정, `crystal_rate`). 업데이트로 절대 덮어쓰지 않고, 새 기본 항목은 없는 것만 추가
+- `settings.json`: 그 밖의 설정 (`mode`, `check_updates`, `update_repo` …)
+- 배포 zip 에는 설정 파일을 넣지 않음. 예전 `config.json` 은 처음 실행 때 두 파일로 나눠 옮김
+
+## 자동 업데이트 (TartarusSolver 방식)
+켤 때 + 6시간마다 `update_repo` 의 최신 릴리스를 확인 → `ShopHelper.zip` 을 받아 GitHub 이 주는 SHA-256 으로 확인 →
+새 버전을 `--install-update <설치폴더> <pid>` 로 실행 → 이전 버전이 끝나면 설치 폴더에 복사하고 다시 시작.
+릴리스는 태그 `vX.Y.Z`, 첨부 파일 이름 `ShopHelper.zip`. **로그인 없이 릴리스를 읽을 수 있어야 하므로 `update_repo` 는 공개 저장소여야 함.**
 
 - `mode`: `resell`(기본, 결정화: 수수료 12.5% 떼고 올림한 실수령 기준) / `use`(직접 사용, 시세 기준)
 - `items`: 1개당 결정 시세 (`crystal_rate` = 결정 1개가 몇 휘석, 기본 50). 모르면 `null`. 도박 항목은 `kind: gamble`, `gamble_min`/`gamble_max`(휘석)

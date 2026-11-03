@@ -85,6 +85,8 @@ public sealed class Config
     [JsonPropertyName("scan_region")] public ScanRegion ScanRegion { get; set; } = new();
     [JsonPropertyName("ocr_scale")] public double OcrScale { get; set; } = 2.0;
     [JsonPropertyName("slot_ocr_scale")] public double SlotOcrScale { get; set; } = 2.5;
+    [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
+    [JsonPropertyName("update_repo")] public string UpdateRepo { get; set; } = "Jaewon234/TLI-ShopHelper";
     [JsonPropertyName("window_class")] public string WindowClass { get; set; } = "UnrealWindow";
     [JsonPropertyName("window_title_contains")] public string WindowTitleContains { get; set; } = "";
     [JsonPropertyName("_items_설명")] public string ItemsNote { get; set; } = "price = 1개당 결정. 모르면 null. kind=gamble 은 gamble_avg(평균 획득 휘석)로 계산";
@@ -169,4 +171,75 @@ public sealed class Config
     }
 
     public void Save(string path) => File.WriteAllText(path, JsonSerializer.Serialize(this, Opts));
+
+    // ---------------- 시세 / 설정 분리 저장 ----------------
+    // prices.json  : 시세만 (항목, 결정 환율). 업데이트해도 절대 덮어쓰지 않음.
+    // settings.json: 그 밖의 설정 (기준, 업데이트 확인 …).
+
+    static readonly string[] PriceKeys = { "_unit_설명", "price_unit", "crystal_rate", "_items_설명", "items" };
+
+    sealed class PricesFile
+    {
+        [JsonPropertyName("_설명")] public string Note { get; set; } = "시세 (1개당 결정). 업데이트해도 바뀌지 않습니다. crystal_rate = 결정 1개가 몇 휘석인지";
+        [JsonPropertyName("price_unit")] public string PriceUnit { get; set; } = "crystal";
+        [JsonPropertyName("crystal_rate")] public double CrystalRate { get; set; } = 50;
+        [JsonPropertyName("items")] public List<ItemDef> Items { get; set; } = new();
+    }
+
+    public void SaveSplit(string settingsPath, string pricesPath)
+    {
+        SavePrices(pricesPath);
+        SaveSettings(settingsPath);
+    }
+
+    public void SavePrices(string pricesPath) =>
+        WriteAtomic(pricesPath, JsonSerializer.Serialize(new PricesFile { PriceUnit = PriceUnit, CrystalRate = CrystalRate, Items = Items }, Opts));
+
+    public void SaveSettings(string settingsPath)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(this, Opts))!.AsObject();
+        foreach (var k in PriceKeys) node.Remove(k);
+        WriteAtomic(settingsPath, node.ToJsonString(Opts));
+    }
+
+    /// <summary>중간에 꺼져도 파일이 깨지지 않게: 임시 파일에 쓰고 바꿔치기.</summary>
+    static void WriteAtomic(string path, string text)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, text);
+        File.Move(tmp, path, overwrite: true);
+    }
+
+    /// <summary>
+    /// settings.json + prices.json 을 읽음. 둘 다 없고 예전 config.json 이 있으면 그걸 나눠서 옮김.
+    /// </summary>
+    public static Config LoadSplit(string settingsPath, string pricesPath, params string[] legacyPaths)
+    {
+        if (!File.Exists(settingsPath) && !File.Exists(pricesPath))
+        {
+            var legacy = legacyPaths.FirstOrDefault(File.Exists);
+            var c = legacy != null ? Load(legacy) : new Config();
+            c.SaveSplit(settingsPath, pricesPath);
+            if (legacy != null) try { File.Move(legacy, legacy + ".bak", overwrite: true); } catch { }
+            return c;
+        }
+        var docOpts = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+        var cfg = File.Exists(settingsPath)
+            ? JsonSerializer.Deserialize<Config>(File.ReadAllText(settingsPath), Opts) ?? new Config()
+            : new Config();
+        bool changed = false;
+        if (File.Exists(pricesPath))
+        {
+            string json = File.ReadAllText(pricesPath);
+            var pf = JsonSerializer.Deserialize<PricesFile>(json, Opts) ?? new PricesFile();
+            using (var doc = JsonDocument.Parse(json, docOpts))
+                if (!doc.RootElement.TryGetProperty("price_unit", out _)) pf.PriceUnit = "";
+            cfg.PriceUnit = pf.PriceUnit; cfg.CrystalRate = pf.CrystalRate; cfg.Items = pf.Items;
+        }
+        else changed = true;
+        changed |= cfg.Migrate();
+        if (changed) cfg.SavePrices(pricesPath);
+        if (!File.Exists(settingsPath)) cfg.SaveSettings(settingsPath);
+        return cfg;
+    }
 }

@@ -9,7 +9,7 @@ namespace ShopHelper;
 /// </summary>
 sealed class Overlay
 {
-    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4;
+    const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4, MSG_QUIT = WM_APP + 5;
     // 색 (ARGB)
     static readonly uint Green = Canvas.Argb(255, 34, 197, 94), Red = Canvas.Argb(255, 239, 68, 68),
         Amber = Canvas.Argb(255, 245, 158, 11), Muted = Canvas.Argb(255, 150, 155, 165), Dim = Canvas.Argb(255, 110, 115, 125),
@@ -20,6 +20,8 @@ sealed class Overlay
     Editor? editor;
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
+    volatile Updater.Release? update;
+    volatile bool installing;
     /// <summary>오버레이가 화면 캡처에서 빠졌는지 (null = 아직 확인 전).</summary>
     public volatile object? CaptureExcludedBox;
     public bool? CaptureExcluded { get => CaptureExcludedBox as bool?; private set => CaptureExcludedBox = value; }
@@ -108,6 +110,16 @@ sealed class Overlay
         editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
         editor.Init("ShopHelperEditor", inst);
         onReady();
+        // 업데이트 확인: 켠 뒤 10초, 그 뒤 6시간마다
+        new Thread(() =>
+        {
+            Thread.Sleep(10_000);
+            while (true)
+            {
+                if (cfg.CheckUpdates) CheckUpdate(manual: false);
+                Thread.Sleep(TimeSpan.FromHours(6));
+            }
+        }) { IsBackground = true, Name = "update" }.Start();
 
         while (GetMessageW(out var m, IntPtr.Zero, 0, 0) > 0)
         {
@@ -150,9 +162,14 @@ sealed class Overlay
         AppendMenuW(menu, cfg.Resell ? CHECKED : 0, (UIntPtr)2, "결정화 기준 (팔아서 결정, 수수료 반영)");
         AppendMenuW(menu, cfg.Resell ? 0 : CHECKED, (UIntPtr)1, "직접 사용 기준 (시세)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
-        AppendMenuW(menu, 0, (UIntPtr)3, "config.json 열기 (메모장, 저장하면 자동 반영)");
+        AppendMenuW(menu, 0, (UIntPtr)3, "시세 파일 열기 (prices.json, 저장하면 자동 반영)");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
         AppendMenuW(menu, 0, (UIntPtr)6, "프로그램 로그 열기");
+        AppendMenuW(menu, SEP, UIntPtr.Zero, null);
+        var up = update;
+        AppendMenuW(menu, installing ? GRAYED : 0, (UIntPtr)8,
+            installing ? "업데이트 받는 중..." : up != null ? $"업데이트: {up.Tag} 설치 (지금 v{App.Version})" : $"업데이트 확인 (지금 v{App.Version})");
+        AppendMenuW(menu, cfg.CheckUpdates ? CHECKED : 0, (UIntPtr)10, "자동으로 업데이트 확인");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)9, "종료");
         GetCursorPos(out var p);
@@ -163,18 +180,71 @@ sealed class Overlay
         {
             case 1: SetMode("use"); break;
             case 2: SetMode("resell"); break;
-            case 3: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.ConfigPath}\"", null, 1); break;
+            case 3: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.PricesPath}\"", null, 1); break;
             case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
             case 6: ShellExecuteW(IntPtr.Zero, "open", "notepad.exe", $"\"{App.LogPath}\"", null, 1); break;
+            case 8: if (update != null) StartInstall(); else new Thread(() => CheckUpdate(manual: true)) { IsBackground = true }.Start(); break;
+            case 10: cfg.CheckUpdates = !cfg.CheckUpdates; try { App.SaveSettings(cfg); } catch { } break;
             case 9: PostQuitMessage(0); break;
         }
+    }
+
+    // ---------------- 업데이트 ----------------
+    void CheckUpdate(bool manual)
+    {
+        try
+        {
+            var r = Updater.Latest(cfg.UpdateRepo).GetAwaiter().GetResult();
+            App.Log($"업데이트 확인: 최신 {r.Tag}, 지금 v{App.Version}");
+            if (r.Ver > Updater.Current)
+            {
+                update = r;
+                Notify($"새 버전 {r.Tag} 이 있습니다", "이 알림을 누르거나 트레이 메뉴 > 업데이트 를 누르세요. 시세는 그대로 유지됩니다.");
+            }
+            else if (manual) Notify("최신 버전입니다", $"v{App.Version}");
+        }
+        catch (Exception e)
+        {
+            App.Log("업데이트 확인 실패: " + e.Message);
+            if (manual) Notify("업데이트 확인 실패", e.Message);
+        }
+    }
+
+    void StartInstall()
+    {
+        var r = update;
+        if (r == null || installing) return;
+        if (!Updater.IsReleaseInstall)
+        {
+            Notify("자동 업데이트를 할 수 없는 위치입니다", "릴리스 zip 을 푼 폴더에서 실행할 때만 됩니다. 릴리스 페이지에서 직접 받아 주세요.");
+            if (r.Page.Length > 0) ShellExecuteW(IntPtr.Zero, "open", r.Page, null, null, 1);
+            return;
+        }
+        installing = true;
+        Notify($"{r.Tag} 받는 중...", "끝나면 자동으로 다시 시작합니다.");
+        new Thread(() =>
+        {
+            try
+            {
+                string dir = Updater.Download(r).GetAwaiter().GetResult();
+                App.Log($"업데이트 {r.Tag} 받음 → {dir}");
+                Updater.Launch(dir);
+                PostMessageW(msgWnd, MSG_QUIT, IntPtr.Zero, IntPtr.Zero);   // 새 버전이 이 프로그램이 끝나길 기다림
+            }
+            catch (Exception e)
+            {
+                App.Log("업데이트 실패: " + e);
+                installing = false;
+                Notify("업데이트 실패", e.Message);
+            }
+        }) { IsBackground = true, Name = "install" }.Start();
     }
 
     void SetMode(string mode)
     {
         cfg.Mode = mode;
-        try { cfg.Save(App.ConfigPath); } catch { }
+        try { App.SaveSettings(cfg); } catch { }
         Engine?.Reevaluate();
     }
 
@@ -189,10 +259,10 @@ sealed class Overlay
     {
         try
         {
-            var n = Config.Load(App.ConfigPath);
+            var n = App.LoadConfig();
             cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost; cfg.CrystalRate = n.CrystalRate;
             Engine?.Reevaluate();
-            Notify("시세 설정 반영됨", $"config.json 변경 감지 (항목 {n.Items.Count}개)");
+            Notify("시세 설정 반영됨", $"파일 변경 감지 (항목 {n.Items.Count}개)");
             return true;
         }
         catch (Exception e) { App.Log("config.json 오류: " + e.Message); return false; }
@@ -221,7 +291,8 @@ sealed class Overlay
                     return IntPtr.Zero;
                 case MSG_TRAY:
                     int ev = (int)(l.ToInt64() & 0xFFFF);
-                    if (ev == WM_LBUTTONDBLCLK) OpenEditor();
+                    if (ev == 0x405 /*NIN_BALLOONUSERCLICK*/ && update != null && !installing) StartInstall();
+                    else if (ev == WM_LBUTTONDBLCLK) OpenEditor();
                     else if (ev == WM_RBUTTONUP || ev == WM_CONTEXTMENU) TrayMenu();
                     return IntPtr.Zero;
                 case MSG_PANEL:
@@ -234,6 +305,9 @@ sealed class Overlay
                         else editor.CloseShop();
                     }
                     Render(); // 이익 카드를 시세 창 위로 옮김
+                    return IntPtr.Zero;
+                case MSG_QUIT:
+                    PostQuitMessage(0);
                     return IntPtr.Zero;
                 case MSG_NOTIFY:
                     ShowBalloon();

@@ -282,6 +282,23 @@ static class T
         Check(re.Items.Single(i => i.Name == "이계의 메아리").Price == 0.13, "메아리 0.13 그대로");
         Check(re.Items.Single(i => i.Name == "절대자 엠버").Price == 20.5, "새 기본 항목만 추가");
 
+        Console.WriteLine("[11] 시세(prices.json) / 설정(settings.json) 분리");
+        var dir = Path.Combine(Path.GetTempPath(), "shophelper_split_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        string sp = Path.Combine(dir, "settings.json"), pp = Path.Combine(dir, "prices.json"), lp = Path.Combine(dir, "config.json");
+        var legacyCfg = new Config(); legacyCfg.Items.Single(i => i.Name == "에너지 코어").Price = 0.05; legacyCfg.Mode = "use"; legacyCfg.Save(lp);
+        var c1 = Config.LoadSplit(sp, pp, lp);
+        Check(File.Exists(sp) && File.Exists(pp) && !File.Exists(lp) && File.Exists(lp + ".bak"), "예전 config.json → 두 파일로 나눔 (.bak 남김)");
+        Check(c1.Mode == "use" && c1.Items.Single(i => i.Name == "에너지 코어").Price == 0.05, "값 그대로 옮김");
+        Check(!File.ReadAllText(sp).Contains("items") && File.ReadAllText(pp).Contains("에너지 코어"), "설정 파일엔 시세 없음, 시세 파일엔 있음");
+        c1.Mode = "resell"; c1.SaveSettings(sp);
+        var c2 = Config.LoadSplit(sp, pp);
+        Check(c2.Mode == "resell" && c2.Items.Single(i => i.Name == "에너지 코어").Price == 0.05, "설정만 바꿔 저장해도 시세 유지");
+        File.Delete(sp);   // 새 버전에서 settings.json 이 없어진 상황
+        var c3 = Config.LoadSplit(sp, pp);
+        Check(c3.Items.Single(i => i.Name == "에너지 코어").Price == 0.05 && File.Exists(sp), "설정 파일이 없어도 시세는 그대로");
+        Directory.Delete(dir, true);
+
         Console.WriteLine(fails == 0 ? "\n모든 테스트 통과" : $"\n실패 {fails}개");
         return fails;
     }

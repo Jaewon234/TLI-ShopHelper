@@ -288,7 +288,7 @@ sealed class Editor
 
         cfg.CrystalRate = rate;
         cfg.Items = items;
-        try { cfg.Save(App.ConfigPath); App.ConfigSaved(); } catch (Exception e) { errors.Add("저장 실패: " + e.Message); }
+        try { App.SavePrices(cfg); } catch (Exception e) { errors.Add("저장 실패: " + e.Message); }
         applied();
         dirty = false;
         if (!ShopMode && errors.Count == 0) { Destroy(); return; }

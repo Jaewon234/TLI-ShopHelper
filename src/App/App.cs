@@ -12,23 +12,23 @@ static class App
     /// 새 버전 zip 을 같은 폴더에 풀어도 입력한 시세가 덮어써지지 않음.
     /// </summary>
     public static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ShopHelper");
-    public static readonly string ConfigPath = Path.Combine(DataDir, "config.json");
-    static readonly string OldConfigPath = Path.Combine(Dir, "config.json");
+    /// <summary>시세만 (업데이트해도 절대 바뀌지 않음)</summary>
+    public static readonly string PricesPath = Path.Combine(DataDir, "prices.json");
+    /// <summary>그 밖의 설정</summary>
+    public static readonly string SettingsPath = Path.Combine(DataDir, "settings.json");
+    static readonly string[] LegacyConfigs = { Path.Combine(DataDir, "config.json"), Path.Combine(Dir, "config.json") };
 
-    /// <summary>예전 버전처럼 exe 옆에 config.json 이 있고 새 위치에는 없으면, 한 번만 옮겨옴.</summary>
-    static void MoveOldConfig()
+    public static Config LoadConfig()
     {
-        try
-        {
-            Directory.CreateDirectory(DataDir);
-            if (!File.Exists(ConfigPath) && File.Exists(OldConfigPath))
-            {
-                File.Copy(OldConfigPath, ConfigPath);
-                Log("예전 config.json 을 " + ConfigPath + " 로 옮김");
-            }
-        }
-        catch (Exception e) { Log("설정 폴더 오류: " + e.Message); }
+        Directory.CreateDirectory(DataDir);
+        var c = Config.LoadSplit(SettingsPath, PricesPath, LegacyConfigs);
+        ConfigSaved();
+        return c;
     }
+
+    public static void SavePrices(Config c) { c.SavePrices(PricesPath); ConfigSaved(); }
+    public static void SaveSettings(Config c) { c.SaveSettings(SettingsPath); ConfigSaved(); }
+
     public static readonly string LogPath = Path.Combine(Dir, "helper.log");
     static readonly object logLock = new();
 
@@ -40,14 +40,15 @@ static class App
         }
     }
 
-    static DateTime savedAt;
-    public static void ConfigSaved() { try { savedAt = File.GetLastWriteTimeUtc(ConfigPath); } catch { } }
-    /// <summary>메모장 등으로 config.json 을 바꿨는지 (우리가 저장한 건 제외).</summary>
+    static (DateTime, DateTime) savedAt;
+    static (DateTime, DateTime) Stamp() => (File.GetLastWriteTimeUtc(PricesPath), File.GetLastWriteTimeUtc(SettingsPath));
+    public static void ConfigSaved() { try { savedAt = Stamp(); } catch { } }
+    /// <summary>메모장 등으로 prices.json / settings.json 을 바꿨는지 (우리가 저장한 건 제외).</summary>
     public static bool ConfigChangedOutside()
     {
         try
         {
-            var t = File.GetLastWriteTimeUtc(ConfigPath);
+            var t = Stamp();
             if (t == savedAt) return false;
             savedAt = t; return true;
         }
@@ -56,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.5.4";
+    public const string Version = "1.6.0";
 
     [STAThread]
     static int Main(string[] args)
@@ -82,11 +83,13 @@ static class App
     {
         Log($"시작 v{Version} · {Environment.OSVersion} · {Environment.ProcessPath}");
         SetProcessDpiAwarenessContext(new IntPtr(-4)); // Per-monitor v2
+        // 자동 업데이트: 새 버전이 임시 폴더에서 이 옵션으로 실행되어 설치 폴더에 자기를 복사
+        if (args.Length >= 3 && args[0] == "--install-update" && int.TryParse(args[2], out int oldPid))
+            return Updater.InstallHere(args[1], oldPid);
+        Updater.Cleanup();
         Config cfg;
-        MoveOldConfig();
-        Log("설정 파일: " + ConfigPath);
-        try { cfg = Config.Load(ConfigPath); }
-        catch (Exception e) { Error("config.json 을 읽을 수 없습니다:\n" + e.Message); return 1; }
+        try { cfg = LoadConfig(); Log("시세 파일: " + PricesPath); }
+        catch (Exception e) { Error("시세/설정 파일을 읽을 수 없습니다:\n" + e.Message + "\n\n" + DataDir); return 1; }
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
         WinOcr ocr;
