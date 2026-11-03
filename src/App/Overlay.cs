@@ -10,9 +10,10 @@ namespace ShopHelper;
 sealed class Overlay
 {
     const uint MSG_UPDATE = WM_APP + 1, MSG_TRAY = WM_APP + 2, MSG_NOTIFY = WM_APP + 3, MSG_PANEL = WM_APP + 4;
-    const uint KEY = 0x010101;
-    static readonly uint Green = Rgb(46, 204, 113), Red = Rgb(231, 76, 60), Gray = Rgb(149, 165, 166),
-        Yellow = Rgb(241, 196, 15), White = Rgb(230, 230, 230), PanelBg = Rgb(27, 27, 27);
+    // 색 (ARGB)
+    static readonly uint Green = Canvas.Argb(255, 34, 197, 94), Red = Canvas.Argb(255, 239, 68, 68),
+        Amber = Canvas.Argb(255, 245, 158, 11), Muted = Canvas.Argb(255, 150, 155, 165), Dim = Canvas.Argb(255, 110, 115, 125),
+        Txt = Canvas.Argb(255, 232, 234, 238), Gold = Canvas.Argb(255, 234, 179, 8);
 
     readonly Config cfg;
     public Engine? Engine;
@@ -20,13 +21,14 @@ sealed class Overlay
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     readonly WndProc proc;   // GC 방지
-    IntPtr hwnd, msgWnd, keyBrush, panelBrush, icon;
+    IntPtr hwnd, msgWnd, icon;
+    IntPtr memDc, dib, dibBits, oldBmp;
+    int dibW, dibH;
     readonly object gate = new();
     (int X, int Y, int W, int H) rect, placed;
     Snapshot? snap;
     bool visible;
     string notifyTitle = "", notifyText = "";
-    readonly Dictionary<int, IntPtr> fonts = new();
 
     public Overlay(Config cfg)
     {
@@ -84,16 +86,14 @@ sealed class Overlay
             lpszClassName = "ShopHelperOverlay", hIcon = bigIcon, hIconSm = icon,
         };
         RegisterClassExW(ref wc);
-        var ec = wc; ec.lpszClassName = "ShopHelperEditor"; ec.hbrBackground = new IntPtr(16); // COLOR_BTNFACE+1
+        Canvas.Startup();
+        var ec = wc; ec.lpszClassName = "ShopHelperEditor"; ec.hbrBackground = CreateSolidBrush(Rgb(14, 16, 22));
         ec.hCursor = LoadCursorW(IntPtr.Zero, new IntPtr(32512));
         RegisterClassExW(ref ec);
-        keyBrush = CreateSolidBrush(KEY);
-        panelBrush = CreateSolidBrush(PanelBg);
 
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
         App.Log($"오버레이 창 {(hwnd != IntPtr.Zero ? "생성됨" : "생성 실패 (오류 " + Marshal.GetLastWin32Error() + ")")} · 아이콘 {(small != IntPtr.Zero ? "exe" : "기본")}");
-        SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         if (!SetWindowDisplayAffinity(hwnd, 0x11)) App.Log("캡처 제외 설정 실패 (Windows 10 2004 이상 필요)");
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
@@ -187,7 +187,7 @@ sealed class Overlay
         try
         {
             var n = Config.Load(App.ConfigPath);
-            cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost;
+            cfg.Items = n.Items; cfg.Mode = n.Mode; cfg.TaxRate = n.TaxRate; cfg.RefreshCost = n.RefreshCost; cfg.CrystalRate = n.CrystalRate;
             Engine?.Reevaluate();
             Notify("시세 설정 반영됨", $"config.json 변경 감지 (항목 {n.Items.Count}개)");
             return true;
@@ -199,7 +199,7 @@ sealed class Overlay
     {
         try
         {
-            if (editor != null && editor.Handle(h, msg, w, l)) return IntPtr.Zero;
+            if (editor?.Handle(h, msg, w, l) is IntPtr handled) return handled;
             switch (msg)
             {
                 case 0x312: // WM_HOTKEY
@@ -214,7 +214,7 @@ sealed class Overlay
                         SetWindowPos(hwnd, HWND_TOPMOST, r.X, r.Y, r.W, r.H, SWP_NOACTIVATE | SWP_SHOWWINDOW);
                     }
                     else SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOACTIVATE | 0x1 | 0x2); // 맨 위 유지
-                    InvalidateRect(hwnd, IntPtr.Zero, false);
+                    Render();
                     return IntPtr.Zero;
                 case MSG_TRAY:
                     int ev = (int)(l.ToInt64() & 0xFFFF);
@@ -230,127 +230,156 @@ sealed class Overlay
                         else if (want.st == PanelState.Hidden) editor.HideInShop();
                         else editor.CloseShop();
                     }
+                    Render(); // 이익 카드를 시세 창 위로 옮김
                     return IntPtr.Zero;
                 case MSG_NOTIFY:
                     ShowBalloon();
                     return IntPtr.Zero;
-                case WM_PAINT:
-                    if (h == hwnd) { Paint(); return IntPtr.Zero; }
-                    break;
             }
         }
         catch (Exception e) { App.Log("UI 오류: " + e); }
         return DefWindowProcW(h, msg, w, l);
     }
 
-    // ---------------- 그리기 ----------------
-    IntPtr Font(int px)
+    // ---------------- 그리기 (반투명, UpdateLayeredWindow) ----------------
+    void EnsureDib(int w, int h)
     {
-        px = Math.Clamp(px, 9, 60);
-        if (!fonts.TryGetValue(px, out var f))
-            fonts[px] = f = CreateFontW(-px, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 4, 0, "Malgun Gothic");
-        return f;
+        if (w == dibW && h == dibH && dib != IntPtr.Zero) return;
+        if (memDc != IntPtr.Zero) { SelectObject(memDc, oldBmp); DeleteDC(memDc); }
+        if (dib != IntPtr.Zero) DeleteObject(dib);
+        var scr = GetDC(IntPtr.Zero);
+        memDc = CreateCompatibleDC(scr);
+        ReleaseDC(IntPtr.Zero, scr);
+        var bi = new BITMAPINFOHEADER { biSize = Marshal.SizeOf<BITMAPINFOHEADER>(), biWidth = w, biHeight = -h, biPlanes = 1, biBitCount = 32 };
+        dib = CreateDIBSection(memDc, ref bi, 0, out dibBits, IntPtr.Zero, 0);
+        oldBmp = SelectObject(memDc, dib);
+        dibW = w; dibH = h;
     }
 
-    void Paint()
+    void Render()
     {
-        var dc = BeginPaint(hwnd, out var ps);
         (int X, int Y, int W, int H) r; Snapshot? s; bool vis;
         lock (gate) { r = placed; s = snap; vis = visible; }
-        int w = Math.Max(1, r.W), h = Math.Max(1, r.H);
-        var mem = CreateCompatibleDC(dc);
-        var bmp = CreateCompatibleBitmap(dc, w, h);
-        var oldBmp = SelectObject(mem, bmp);
-        var all = new RECT { Right = w, Bottom = h };
-        FillRect(mem, ref all, keyBrush);
-        if (vis && s != null) Draw(mem, s, w, h);
-        BitBlt(dc, 0, 0, w, h, mem, 0, 0, SRCCOPY);
-        SelectObject(mem, oldBmp);
-        DeleteObject(bmp);
-        DeleteDC(mem);
-        EndPaint(hwnd, ref ps);
+        if (r.W <= 0 || r.H <= 0) return;
+        EnsureDib(r.W, r.H);
+        using (var c = Canvas.OnBits(dibBits, r.W, r.H))
+        {
+            c.Clear(0);
+            if (vis && s != null) Draw(c, s, r);
+        }
+        var dst = new POINT { X = r.X, Y = r.Y };
+        var size = new SIZE { cx = r.W, cy = r.H };
+        var src = new POINT();
+        var blend = new BLENDFUNCTION { BlendOp = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
+        var scr = GetDC(IntPtr.Zero);
+        UpdateLayeredWindow(hwnd, scr, ref dst, ref size, memDc, ref src, 0, ref blend, 2 /*ULW_ALPHA*/);
+        ReleaseDC(IntPtr.Zero, scr);
     }
 
-    void Frame(IntPtr dc, Box b, uint color, int width)
+    string Gain(double huiseok)
     {
-        var pen = CreatePen(0, width, color);
-        var op = SelectObject(dc, pen);
-        var ob = SelectObject(dc, GetStockObject(5)); // NULL_BRUSH
-        Native.Rectangle(dc, (int)b.X1, (int)b.Y1, (int)b.X2, (int)b.Y2);
-        SelectObject(dc, ob); SelectObject(dc, op);
-        DeleteObject(pen);
+        double v = huiseok / PriceInput.CrystalPrice(cfg);
+        return (v > 0 ? "+" : "") + v.ToString("0.##") + "결";
     }
 
-    /// <summary>글자 상자. anchor: 0=위 가운데, 1=아래 가운데, 2=오른쪽 위</summary>
-    void Label(IntPtr dc, double x, double y, string text, uint color, int px, int anchor = 0)
+    void Draw(Canvas c, Snapshot s, (int X, int Y, int W, int H) client)
     {
-        SelectObject(dc, Font(px));
-        var m = new RECT();
-        DrawTextW(dc, text, -1, ref m, 0x400 | 0x800); // CALCRECT | NOPREFIX
-        int tw = m.Right - m.Left, th = m.Bottom - m.Top, pad = Math.Max(3, px / 4);
-        int left = anchor == 2 ? (int)x - tw - pad * 2 : (int)(x - tw / 2.0) - pad;
-        int top = anchor == 1 ? (int)y - th - pad * 2 : (int)y;
-        var bg = new RECT { Left = left, Top = top, Right = left + tw + pad * 2, Bottom = top + th + pad * 2 };
-        FillRect(dc, ref bg, panelBrush);
-        Frame(dc, new Box(bg.Left, bg.Top, bg.Right, bg.Bottom), color, 1);
-        SetBkMode(dc, 1);
-        SetTextColor(dc, color);
-        var tr = new RECT { Left = left + pad, Top = top + pad, Right = left + pad + tw, Bottom = top + pad + th };
-        DrawTextW(dc, text, -1, ref tr, 0x800);
-    }
-
-    void Draw(IntPtr dc, Snapshot s, int w, int h)
-    {
-        int basePx = s.Slots.Count > 0 ? (int)(s.Slots[0].R.H / 5.4) : Math.Max(12, h / 70);
-        basePx = Math.Max(11, basePx);
-        double crystal = PriceInput.CrystalPrice(cfg);
-        string Gain(double huiseok) => (huiseok > 0 ? "+" : "") + (huiseok / crystal).ToString("0.##") + "결";
+        // 글자 크기는 카드 글자 높이에 맞춤 (UI 크기 따라감)
+        double th = s.Slots.Count > 0 ? s.Slots[0].R.H / 4.8 : Math.Max(14, client.H / 60.0);
+        th = Math.Clamp(th, 11, 40);
+        double big = th * 1.15, small = th * 0.78, tiny = th * 0.62;
+        var darkBg = Canvas.Argb(225, 12, 14, 20);
 
         foreach (var sl in s.Slots)
         {
-            var c = sl.Card;
-            var d = sl.D;
-            if (sl.Pending) { Frame(dc, d, Yellow, 1); continue; }
-            if (c == null)
+            var d = sl.D; var cd = sl.Card;
+            double rr = th * 0.45;
+            if (sl.Pending) { c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.WithAlpha(Gold, 120), 1.5); continue; }
+            if (cd == null)
             {
-                Frame(dc, d, Gray, 1);
-                Label(dc, d.Cx, d.Y1 - 4, "읽기 실패", Gray, basePx, 1);
+                c.Pill(d.Cx, d.Y1, "읽기 실패", small, true, darkBg, Muted);
                 continue;
             }
-            switch (c.Status)
+            switch (cd.Status)
             {
+                case Verdict.Sold:
+                    break; // 게임이 이미 '매진' 표시
                 case Verdict.Good:
-                    // 사야 할 칸: 굵은 초록 테두리 + 위쪽에 "구매 +N결"
-                    Frame(dc, d, Green, Math.Max(4, basePx / 3));
-                    Frame(dc, new Box(d.X1 + 5, d.Y1 + 5, d.X2 - 5, d.Y2 - 5), Green, 1);
-                    Label(dc, d.Cx, d.Y1 - 4, "구매 " + Gain(c.Diff!.Value), Green, basePx + 4, 1);
+                    c.Glow(d.X1, d.Y1, d.W, d.H, rr, Green, (int)Math.Max(6, th * 0.5));
+                    c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Green, Math.Max(3, th * 0.18));
+                    c.Pill(d.Cx, d.Y1, "구매  " + Gain(cd.Diff!.Value), big, true, Green, Canvas.Argb(255, 6, 30, 14));
+                    if (cd.Item?.IsGamble == true)
+                        c.Pill(d.Cx, d.Y1 + big * 1.6, GambleLine(cd), tiny, true, Canvas.Argb(215, 6, 30, 14), Canvas.Argb(255, 190, 240, 205));
+                    break;
+                case Verdict.Gamble:
+                    c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.WithAlpha(Amber, 230), 2);
+                    c.Pill(d.Cx, d.Y1, Efficiency(cd), small, true, Canvas.Argb(235, 40, 28, 6), Amber);
+                    c.Pill(d.Cx, d.Y1 + small * 1.75, GambleLine(cd), tiny, true, Canvas.Argb(215, 40, 28, 6), Canvas.Argb(255, 220, 190, 120));
                     break;
                 case Verdict.Bad:
-                    Frame(dc, d, Red, 1);
-                    Label(dc, d.Cx, d.Y1 - 4, Gain(c.Diff!.Value), Red, basePx - 1, 1);
+                    c.FillRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.Argb(140, 8, 10, 16));   // 손해 칸은 눌러줌
+                    c.Pill(d.Cx, d.Y1, Gain(cd.Diff!.Value), small, true, Canvas.Argb(225, 30, 12, 14), Red);
                     break;
-                case Verdict.Sold:
-                    break; // 매진은 게임이 이미 표시하므로 아무것도 그리지 않음
                 default:
-                    Frame(dc, d, Gray, 1);
-                    Label(dc, d.Cx, d.Y1 - 4, c.Item == null ? "모르는 항목" : "시세 없음", Gray, basePx - 1, 1);
+                    c.FillRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.Argb(110, 8, 10, 16));
+                    c.Pill(d.Cx, d.Y1, cd.Item == null ? "모르는 항목" : "시세 없음", small, true, Canvas.Argb(225, 30, 32, 38), Muted);
                     break;
             }
         }
+        DrawSummary(c, s, client, th);
+    }
 
+    string Efficiency(Card cd)
+    {
+        if (cd.Value is not double v || cd.Price <= 0) return "도박 · 범위 미입력";
+        return $"도박 · 효율 {v / cd.Price * 100:0}%";
+    }
+
+    string GambleLine(Card cd)
+    {
+        if (cd.Diff is not double d) return "알려주시면 계산";
+        string range = cd.RangeLo is double lo && cd.RangeHi is double hi ? $" · {Gain(lo)} ~ {Gain(hi)}" : "";
+        return $"기대 {Gain(d)}{range}";
+    }
+
+    /// <summary>이익 카드: 상점 안에서는 시세 창 바로 위, 시세 창이 없으면 새로고침 버튼 위.</summary>
+    void DrawSummary(Canvas c, Snapshot s, (int X, int Y, int W, int H) client, double th)
+    {
+        double sc = Math.Clamp(th / 20.0, 0.7, 1.6);
         var good = s.Slots.Where(x => x.Card?.Status == Verdict.Good).ToList();
-        var lines = new List<string>
+        string head = "이 화면";
+        string value = (s.PageGain > 0 ? "+" : "") + (s.PageGain / PriceInput.CrystalPrice(cfg)).ToString("0.##") + "결";
+        string side = $"구매 {good.Count}칸 · {(cfg.Resell ? "결정화 기준" : "직접 사용 기준")}";
+        string line2 = s.Pages > 0 ? $"평균 이득 {Gain(s.SumGain / s.Pages)} · 본 화면 {s.Pages}개" : "";
+        if (s.LatencyMs is double ms) line2 += (line2.Length > 0 ? " · " : "") + $"{ms:0}ms";
+        if (s.Status.Length > 0) line2 = s.Status;
+
+        double w = 400 * sc, h = (line2.Length > 0 ? 132 : 92) * sc;
+        double x, y;
+        var er = editor?.ShopScreenRect();
+        if (er is { } e)
         {
-            $"이 화면 이득 {Gain(s.PageGain)}  (구매 {good.Count}칸)  [{(cfg.Resell ? "결정화 기준" : "직접 사용 기준")}]",
-        };
-        if (s.Pages > 0)
-            lines.Add($"본 화면 {s.Pages}개 · 평균 이득 {Gain(s.SumGain / s.Pages)} / 새로고침 {(cfg.RefreshCost / crystal):0.##}결");
-        if (s.LatencyMs is double ms) lines.Add($"반영 {ms:0}ms");
-        if (s.Status.Length > 0) lines.Add(s.Status);
-        string text = string.Join("\n", lines);
-        if (s.Refresh is Box rb)
-            Label(dc, rb.Cx, rb.Y1 - rb.H * 3.5, text, Yellow, basePx + 1, 1);
-        else
-            Label(dc, w - 16, h * 0.07, text, Yellow, basePx + 1, 2);
+            x = e.X - client.X; w = e.W;
+            y = e.Y - client.Y - 12 * sc - h;
+        }
+        else if (s.Refresh is Box rb)
+        {
+            x = rb.Cx - w / 2; y = rb.Y1 - rb.H * 2.2 - h;
+        }
+        else { x = client.W - w - 20 * sc; y = 20 * sc; }
+
+        c.FillRound(x, y, w, h, 14 * sc, Canvas.Argb(228, 12, 14, 20));
+        c.StrokeRound(x, y, w, h, 14 * sc, Canvas.Argb(28, 255, 255, 255), 1);
+        double px = x + 18 * sc;
+        c.Text(px, y + 12 * sc, head, 15 * sc, false, Muted);
+        uint vcol = s.PageGain > 0 ? Green : Muted;
+        c.Text(px, y + 32 * sc, value, 36 * sc, true, vcol);
+        var (vw, _) = c.Measure(value, 36 * sc, true);
+        c.Text(px + vw + 16 * sc, y + 50 * sc, side, 14 * sc, false, Muted);
+        if (line2.Length > 0)
+        {
+            c.Line(px, y + 92 * sc, x + w - 18 * sc, y + 92 * sc, Canvas.Argb(24, 255, 255, 255));
+            c.Text(px, y + 102 * sc, line2, 15 * sc, false, Canvas.Argb(255, 210, 214, 220));
+        }
     }
 }

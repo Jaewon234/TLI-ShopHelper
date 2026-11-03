@@ -163,9 +163,22 @@ public static class Parser
     {
         cd.Item = Match(cd.Name, cfg.Items);
         cd.Value = null; cd.Diff = null;
+        cd.RangeLo = cd.RangeHi = null;
         if (cd.Sold) { cd.Status = Verdict.Sold; return; }
+        if (cd.Item is { IsGamble: true } g)
+        {
+            // 도박: 평균 획득 휘석으로 기대 이득, 최소/최대로 범위 (휘석으로 받으니 수수료 없음)
+            double? avg = g.GambleAvg ?? (g.GambleMin + g.GambleMax) / 2;
+            if (avg is not double a) { cd.Status = Verdict.Gamble; return; }   // 범위 미입력
+            cd.Value = a * cd.Qty;
+            cd.Diff = Math.Round(cd.Value.Value - cd.Price, 2);
+            if (g.GambleMin is double lo) cd.RangeLo = lo * cd.Qty - cd.Price;
+            if (g.GambleMax is double hi) cd.RangeHi = hi * cd.Qty - cd.Price;
+            cd.Status = cd.Diff > 0 ? Verdict.Good : Verdict.Gamble;
+            return;
+        }
         if (cd.Item?.Price is not double unit) { cd.Status = Verdict.Unknown; return; }
-        double market = unit * cd.Qty;
+        double market = unit * cfg.CrystalRate * cd.Qty;   // 휘석
         cd.Value = cfg.Resell && cd.Item.Taxed
             ? Math.Ceiling(Math.Round(market * (1 - cfg.TaxRate), 6))
             : Math.Round(market, 6);
@@ -200,7 +213,7 @@ public static class Parser
             i++;
             if (c == null) { sb.AppendLine($"{i}. (읽기 실패)"); continue; }
             string nm = c.Item?.Name ?? $"(모름) {c.Name}";
-            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", Verdict.Sold => "매진", _ => "시세없음" };
+            string tag = c.Status switch { Verdict.Good => "이득", Verdict.Bad => "손해", Verdict.Sold => "매진", Verdict.Gamble => "도박", _ => "시세없음" };
             sb.AppendLine($"{i}. {nm} x{c.Qty} | 가격 {c.Price} | 가치 {Fmt(c.Value)} | {tag} {Fmt(c.Diff)}   [{c.Raw}]");
             if (c.Status == Verdict.Good) total += c.Diff!.Value;
         }

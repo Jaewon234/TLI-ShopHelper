@@ -212,15 +212,36 @@ static class T
         cfg.Mode = "resell"; tr.Reevaluate();
         Check(tr.Snap().Slots[3].Card?.Status == Verdict.Unknown, "불꽃 가루는 시세 없음");
 
-        Console.WriteLine("[7] 시세 입력 해석");
+        Console.WriteLine("[7] 시세 입력 해석 (1개당 결정)");
         double? v;
-        Check(PriceInput.TryParse("5.5", 50, out v) && v == 5.5, "5.5");
-        Check(PriceInput.TryParse("40/20", 50, out v) && v == 2, "40/20 = 2");
-        Check(PriceInput.TryParse("20.5결", 50, out v) && v == 1025, "20.5결 = 1025");
-        Check(PriceInput.TryParse("0.8결/20", 50, out v) && v == 2, "0.8결/20 = 2");
-        Check(PriceInput.TryParse(" 3 / 10개 ", 50, out v) && v == 0.3, "3 / 10개 = 0.3");
+        Check(PriceInput.TryParse("0.11", 50, out v) && v == 0.11, "0.11");
+        Check(PriceInput.TryParse("1/20", 50, out v) && v == 0.05, "1/20 = 0.05");
+        Check(PriceInput.TryParse("5.5휘", 50, out v) && v == 0.11, "5.5휘 = 0.11");
+        Check(PriceInput.TryParse("40휘/20", 50, out v) && v == 0.04, "40휘/20 = 0.04");
+        Check(PriceInput.TryParse("20.5결", 50, out v) && v == 20.5, "20.5결 = 20.5");
         Check(PriceInput.TryParse("", 50, out v) && v == null, "빈칸 = 시세 없음");
         Check(!PriceInput.TryParse("abc", 50, out _) && !PriceInput.TryParse("5/0", 50, out _), "잘못된 입력 거부");
+
+        Console.WriteLine("[8] 신비의 휘석(소) 도박");
+        var gc = new Config();
+        Card G(int price) { var c = new Card { Name = "신비의휘석(소)", Qty = 1, Price = price }; Parser.Evaluate(c, gc); return c; }
+        var g200 = G(200); var g150 = G(150);
+        Check(g200.Status == Verdict.Gamble && g200.Diff == 0 && g200.RangeLo == -150 && g200.RangeHi == 150, "200휘석: 기대 0, -150~+150");
+        Check(g150.Status == Verdict.Good && g150.Diff == 50, "150휘석: 기대 +50 → 구매");
+
+        Console.WriteLine("[9] 예전 설정(1개당 휘석) 자동 변환");
+        var old = new Config { PriceUnit = "", Items = new() {
+            new() { Name = "최초의 불꽃 결정", Price = 50, Taxed = false }, new() { Name = "이계의 메아리", Price = 5.5 },
+            new() { Name = "절대자 엠버", Price = 1025 }, new() { Name = "신비의 휘석(소)", Price = null } } };
+        Check(old.Migrate(), "변환함");
+        Check(old.CrystalRate == 50 && old.Items[0].Price == 1 && old.Items[1].Price == 0.11 && old.Items[2].Price == 20.5, "50휘→1결, 5.5휘→0.11결, 1025휘→20.5결");
+        Check(old.Items.Single(i => i.Name == "신비의 휘석(소)").IsGamble, "신비의 휘석 → 도박 항목");
+        Check(!old.Migrate(), "두 번째는 변환 안 함");
+        var tmp = Path.Combine(Path.GetTempPath(), "shophelper_old_config.json");
+        File.WriteAllText(tmp, "{ \"mode\": \"resell\", \"items\": [ { \"name\": \"최초의 불꽃 결정\", \"price\": 50, \"taxed\": false }, { \"name\": \"에너지 코어\", \"price\": 2 } ] }");
+        var loaded = Config.Load(tmp);
+        Check(loaded.Items.Single(i => i.Name == "에너지 코어").Price == 0.04 && loaded.PriceUnit == "crystal", "예전 파일 읽으면 자동 변환 (코어 2휘 → 0.04결)");
+        Check(File.ReadAllText(tmp).Contains("price_unit"), "변환 후 파일에 저장");
 
         Console.WriteLine(fails == 0 ? "\n모든 테스트 통과" : $"\n실패 {fails}개");
         return fails;
