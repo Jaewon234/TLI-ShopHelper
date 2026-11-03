@@ -191,16 +191,27 @@ sealed class Overlay
             if (r.Ver > Updater.Current)
             {
                 update = r;
-                Notify($"새 버전 {r.Tag} 이 있습니다", "이 알림을 누르거나 트레이 메뉴 > 업데이트 를 누르세요. 시세는 그대로 유지됩니다.");
+                PostMessageW(hwnd, MSG_UPDATE, IntPtr.Zero, IntPtr.Zero);   // 이익 카드에 '새 버전' 표시
+                if (manual)
+                {
+                    // 직접 누른 확인은 알림 대신 창으로 (알림이 꺼져 있어도 보이게)
+                    if (Ask($"새 버전 {r.Tag} 이 있습니다. (지금 v{App.Version})\n\n지금 설치할까요? 시세는 그대로 유지됩니다.")) StartInstall();
+                }
+                else Notify($"새 버전 {r.Tag} 이 있습니다", "이 알림을 누르거나 트레이 메뉴 > 업데이트 를 누르세요. 시세는 그대로 유지됩니다.");
             }
-            else if (manual) Notify("최신 버전입니다", $"v{App.Version}");
+            else if (manual) Info($"최신 버전입니다.\n\n지금 v{App.Version} · GitHub 최신 {r.Tag}");
         }
         catch (Exception e)
         {
             App.Log("업데이트 확인 실패: " + e.Message);
-            if (manual) Notify("업데이트 확인 실패", e.Message);
+            if (manual)
+                Info("업데이트를 확인하지 못했습니다.\n\n" + e.Message +
+                     $"\n\n확인하는 곳: github.com/{cfg.UpdateRepo}\n(저장소가 비공개면 로그인 없이 볼 수 없어 확인이 안 됩니다)");
         }
     }
+
+    static void Info(string text) => MessageBoxW(IntPtr.Zero, text, "신들의 강복 도우미 · 업데이트", 0x40 | 0x40000 | 0x10000);
+    static bool Ask(string text) => MessageBoxW(IntPtr.Zero, text, "신들의 강복 도우미 · 업데이트", 0x4 | 0x20 | 0x40000 | 0x10000) == 6;
 
     void StartInstall()
     {
@@ -227,7 +238,7 @@ sealed class Overlay
             {
                 App.Log("업데이트 실패: " + e);
                 installing = false;
-                Notify("업데이트 실패", e.Message);
+                Info("업데이트를 받지 못했습니다.\n\n" + e.Message);
             }
         }) { IsBackground = true, Name = "install" }.Start();
     }
@@ -423,6 +434,7 @@ sealed class Overlay
         string line2 = s.Pages > 0 ? $"평균 이득 {Gain(s.SumGain / s.Pages)} · 본 화면 {s.Pages}개" : "";
         if (s.LatencyMs is double ms) line2 += (line2.Length > 0 ? " · " : "") + $"{ms:0}ms";
         if (s.Status.Length > 0) line2 = s.Status;
+        if (update is { } nv && !installing) line2 = $"새 버전 {nv.Tag} · 트레이 메뉴 > 업데이트";
 
         double w = 400 * sc, h = (line2.Length > 0 ? 132 : 92) * sc;
         double x, y;
