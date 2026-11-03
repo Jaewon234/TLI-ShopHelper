@@ -208,6 +208,20 @@ static class T
         Run(btr, bocr, bigScene, ref bt, 40);
         Check(bocr.Calls == 0, $"매진 칸을 다시 읽지 않음 - OCR {bocr.Calls}번");
 
+        Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
+        var mixed = Scene.Make(NamesA, PricesA);
+        void Add(string t, double x, double y, double w, double hh = 14) => mixed.Items.Add(new TextItem(t, new Box(x, y, x + w, y + hh)));
+        Add("읽기", 566, 48, 24, 11); Add("실패", 594, 48, 24, 11);            // 카드 위 표시
+        Add("-0.38결", 962, 83, 44, 11); Add("구매", 1325, 82, 34, 16); Add("+3.96결", 1375, 82, 66, 16);
+        Add("기대", 1305, 113, 20, 9); Add("+3.96결", 1328, 113, 36, 9);
+        Add("모르는", 24, 320, 40, 11); Add("항목", 66, 320, 24, 11);           // 왼쪽 가짜 칸
+        Add("이", 30, 440, 8, 11); Add("화면", 42, 440, 24, 11); Add("+3.96결", 32, 460, 104, 28);
+        Add("평균", 30, 512, 24, 11); Add("이득", 58, 512, 24, 11); Add("+0.66결", 86, 512, 40, 11); Add("124ms", 214, 512, 34, 11);
+        var mocr = new FakeOcr { Scene = mixed };
+        var (mc, _) = Parser.Analyze(mocr.Recognize(new Frame(1, 1), new Box(0, 0, 1920, 1080), 1), cfg);
+        Check(mc.Count == 8 && mc.Select(c => c.Price).SequenceEqual(new[] { 66, 77, 13, 12, 107, 390, 56, 200 }), $"8칸·가격 정상 - {string.Join(",", mc.Select(c => c.Price))}");
+        Check(Parser.IsOverlayText("+3.96결") && Parser.IsOverlayText("-0.38결") && Parser.IsOverlayText("구매") && !Parser.IsOverlayText("결정") && !Parser.IsOverlayText("최초의불꽃"), "오버레이 글자 판별");
+
         Console.WriteLine("[6] 시세 모드 변경 후 재평가");
         cfg.Mode = "resell"; tr.Reevaluate();
         Check(tr.Snap().Slots[3].Card?.Status == Verdict.Unknown, "불꽃 가루는 시세 없음");

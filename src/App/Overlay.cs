@@ -20,6 +20,9 @@ sealed class Overlay
     Editor? editor;
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
+    /// <summary>오버레이가 화면 캡처에서 빠졌는지 (null = 아직 확인 전).</summary>
+    public volatile object? CaptureExcludedBox;
+    public bool? CaptureExcluded { get => CaptureExcludedBox as bool?; private set => CaptureExcludedBox = value; }
     readonly WndProc proc;   // GC 방지
     IntPtr hwnd, msgWnd, icon;
     IntPtr memDc, dib, dibBits, oldBmp;
@@ -94,7 +97,7 @@ sealed class Overlay
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
         App.Log($"오버레이 창 {(hwnd != IntPtr.Zero ? "생성됨" : "생성 실패 (오류 " + Marshal.GetLastWin32Error() + ")")} · 아이콘 {(small != IntPtr.Zero ? "exe" : "기본")}");
-        if (!SetWindowDisplayAffinity(hwnd, 0x11)) App.Log("캡처 제외 설정 실패 (Windows 10 2004 이상 필요)");
+        SetWindowDisplayAffinity(hwnd, 0x11); // 처음 그린 뒤 다시 걸고 확인함 (Render)
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 
         msgWnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, "ShopHelperTray", WS_POPUP, 0, 0, 0, 0,
@@ -274,6 +277,14 @@ sealed class Overlay
         var scr = GetDC(IntPtr.Zero);
         UpdateLayeredWindow(hwnd, scr, ref dst, ref size, memDc, ref src, 0, ref blend, 2 /*ULW_ALPHA*/);
         ReleaseDC(IntPtr.Zero, scr);
+        if (CaptureExcluded == null)
+        {
+            // 오버레이가 화면 캡처(OCR)에 찍히면 자기 글자를 상품으로 읽음 → 실제로 빠졌는지 확인
+            SetWindowDisplayAffinity(hwnd, 0x11);
+            bool ok = GetWindowDisplayAffinity(hwnd, out uint a) && a == 0x11;
+            CaptureExcluded = ok;
+            App.Log(ok ? "오버레이 캡처 제외: 적용됨" : $"오버레이 캡처 제외: 실패 (값 {a}) → 게임 창 직접 캡처(PrintWindow) 사용");
+        }
     }
 
     string Gain(double huiseok)

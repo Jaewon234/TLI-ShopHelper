@@ -56,7 +56,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.5.1";
+    public const string Version = "1.5.2";
 
     [STAThread]
     static int Main(string[] args)
@@ -196,6 +196,7 @@ sealed class Engine
         IntPtr hwnd = IntPtr.Zero;
         double lastFind = -1e9;
         bool shown = false;
+        bool printWindowBroken = false;
         double lastCfgCheck = 0;
         while (true)
         {
@@ -242,7 +243,14 @@ sealed class Engine
             }
             var (x, y, w, h) = rect.Value;
             var rows = tracker.Rows;
-            var frame = rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
+            // 오버레이가 캡처에서 빠지면 빠른 화면 캡처, 아니면 게임 창만 직접 받아옴 (오버레이 글자가 섞이지 않게)
+            Frame? frame = null;
+            if (overlay.CaptureExcluded != true && !printWindowBroken)
+            {
+                frame = grab.GrabWindow(hwnd, w, h);
+                if (frame == null) { printWindowBroken = true; App.Log("PrintWindow 가 검은 화면 → 화면 캡처 사용 (오버레이 글자는 OCR 에서 걸러냄)"); }
+            }
+            frame ??= rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
             bool dirty = tracker.Update(frame, now);
             if (dirty)
             {

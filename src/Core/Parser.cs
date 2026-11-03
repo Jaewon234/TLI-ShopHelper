@@ -39,7 +39,26 @@ public static class Parser
             }
             Flush();
         }
+        segs.RemoveAll(s => IsOverlayText(s.Text));
         return segs;
+    }
+
+    static readonly Regex OverlayNum = new(@"^[+\-−]?[0-9]+(\.[0-9]+)?결", RegexOptions.Compiled);
+    static readonly string[] OverlayWords =
+        { "구매", "기대", "도박", "효율", "읽기실패", "모르는항목", "시세없음", "이화면", "평균이득", "본화면", "결정화기준",
+          "직접사용기준", "범위미입력", "시세입력", "적용됨", "1개당결정", "입력완료" };
+
+    /// <summary>
+    /// 이 프로그램이 화면에 그린 글자인지 (+3.96결, 구매, 기대 …). 오버레이가 캡처에 섞여 들어와도
+    /// 상품 이름/가격으로 착각하지 않게 버림. 게임 상품 이름에는 이런 말이 없음.
+    /// </summary>
+    public static bool IsOverlayText(string t)
+    {
+        string n = Norm(t);
+        if (n.Length == 0) return false;
+        if (OverlayNum.IsMatch(n)) return true;
+        foreach (var w in OverlayWords) if (n.Contains(w)) return true;
+        return false;
     }
 
     /// <summary>세로로 이어지는 조각을 하나의 칸(열)으로 묶음.</summary>
@@ -120,7 +139,7 @@ public static class Parser
         // 글자 크기가 다른 것(다른 UI 글자)은 빼고, 줄 순서(위→아래, 왼→오른)로 정렬.
         double mh = Median(cards.Select(c => c.H));
         cards = cards.Where(c => c.H > mh * 0.6 && c.H < mh * 1.6).ToList();
-        return SortRows(cards);
+        return KeepGridRows(SortRows(cards));
     }
 
     /// <summary>가격 줄 높이가 같은 카드끼리 한 줄로 묶어서 위→아래, 왼→오른 순서로.</summary>
@@ -133,6 +152,34 @@ public static class Parser
             if (row == null) rows.Add(new List<Card> { cd }); else row.Add(cd);
         }
         return rows.SelectMany(r => r.OrderBy(c => c.B.X1)).ToList();
+    }
+
+    /// <summary>
+    /// 가장 긴 줄을 기준 줄로 보고, 다른 줄은 칸이 기준 줄의 세로줄(같은 간격)에 맞을 때만 남김.
+    /// 두 줄 배치(6+2)는 남고, 엉뚱한 위치의 글자로 생긴 가짜 칸은 빠짐.
+    /// </summary>
+    static List<Card> KeepGridRows(List<Card> cards)
+    {
+        if (cards.Count == 0) return cards;
+        var rows = new List<List<Card>>();
+        foreach (var cd in cards)
+        {
+            var row = rows.FirstOrDefault(r => Math.Abs(r[0].PriceBox.Y1 - cd.PriceBox.Y1) < 1.5 * cd.H);
+            if (row == null) rows.Add(new List<Card> { cd }); else row.Add(cd);
+        }
+        var main = rows.OrderByDescending(r => r.Count).ThenBy(r => r[0].PriceBox.Y1).First();
+        if (main.Count < 2) return main;
+        var xs = main.Select(c => c.B.Cx).OrderBy(x => x).ToList();
+        double spacing = double.MaxValue;
+        for (int i = 1; i < xs.Count; i++) spacing = Math.Min(spacing, xs[i] - xs[i - 1]);
+        bool OnGrid(Card c)
+        {
+            double f = (c.B.Cx - xs[0]) / spacing;
+            return f > -0.25 && Math.Abs(f - Math.Round(f)) < 0.25;
+        }
+        double mainH = Median(main.Select(c => c.H));
+        return rows.Where(r => r == main || (r.All(OnGrid) && r.All(c => Math.Abs(c.H - mainH) < mainH * 0.3)))
+                   .SelectMany(r => r).ToList();
     }
 
     /// <summary>difflib.SequenceMatcher.ratio 와 비슷한 유사도 (LCS 기반).</summary>

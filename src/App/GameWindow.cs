@@ -150,6 +150,22 @@ sealed class Grabber : IDisposable
         return frame;
     }
 
+    /// <summary>
+    /// 게임 창 내용만 직접 받아옴 (PrintWindow). 다른 창(오버레이 등)은 안 찍힘.
+    /// 캡처 제외 설정이 안 되는 PC 용. 검은 화면이면 null.
+    /// </summary>
+    public Frame? GrabWindow(IntPtr hwnd, int width, int height)
+    {
+        if (width != w || height != h || dib == IntPtr.Zero) Alloc(width, height);
+        if (!PrintWindow(hwnd, memDc, 0x1 | 0x2)) return null; // CLIENTONLY | RENDERFULLCONTENT
+        Marshal.Copy(bits, frame!.Px, 0, frame.Px.Length);
+        // 검은 화면인지 (DirectX 창에서 실패하는 경우)
+        long sum = 0;
+        var px = frame.Px;
+        for (int i = 0; i < px.Length; i += 4 * 997) sum += px[i] + px[i + 1] + px[i + 2];
+        return sum == 0 ? null : frame;
+    }
+
     void Alloc(int width, int height)
     {
         Free();
