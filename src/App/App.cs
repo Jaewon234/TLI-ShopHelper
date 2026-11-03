@@ -57,7 +57,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.6.15";
+    public const string Version = "1.6.16";
 
     [STAThread]
     static int Main(string[] args)
@@ -152,6 +152,8 @@ sealed class Engine
 
     public void Start() => new Thread(Run) { IsBackground = true, Name = "engine" }.Start();
     public void Reevaluate() { reevaluate = true; wake.Set(); }
+    volatile bool resetProfit;
+    public void ResetProfit() { resetProfit = true; wake.Set(); }
     volatile List<string> unknown = new();
     int unknownVer;
     public List<string> UnknownNames() => unknown;
@@ -250,6 +252,7 @@ sealed class Engine
                 lastCfgCheck = now;
                 if (App.ConfigChangedOutside() && overlay.ReloadFromDisk()) App.Log("config.json 변경 감지 → 다시 읽음");
             }
+            if (resetProfit) { resetProfit = false; tracker.ResetProfit(); App.Log("순이익 초기화"); if (shown) overlay.Show(null, tracker.Snap()); }
             if (reevaluate) { reevaluate = false; tracker.Reevaluate(); if (shown) overlay.Show(null, tracker.Snap()); }
             if (saveRequested)
             {

@@ -89,6 +89,14 @@ sealed class Editor
     bool expanded;   // 상점 안에서 입력 창이 펼쳐져 있는지
     bool ToggleExists => toggle != IntPtr.Zero && IsWindow(toggle);
 
+    /// <summary>순이익 표시를 붙일 자리: 상점 안에 보이는 [시세 입력] 버튼 또는 펼친 시세 창 (화면 좌표, 시세 칸 폭)</summary>
+    public (int X, int Y, int W, int H)? AnchorScreenRect()
+    {
+        if (ShopScreenRect() is { } e) return e;
+        if (ToggleExists && IsWindowVisible(toggle)) { GetWindowRect(toggle, out var r); return (r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top); }
+        return null;
+    }
+
     /// <summary>지금 화면에 보이는 시세 창/버튼 (화면 그대로 저장용)</summary>
     public IEnumerable<IntPtr> VisibleWindows()
     {

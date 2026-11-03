@@ -362,6 +362,19 @@ static class T
         Run(trS, ocrS, sceneS, ref tS, 10);
         Check(trS.Snap().Slots[5].Card?.Status == Verdict.Sold && ocrS.Calls == 0, $"6번 칸 매진 처리, OCR {ocrS.Calls}번");
 
+        Console.WriteLine("[5h] 순이익: 구매(매진으로 바뀜) 이득 − 새로고침 × 50휘");
+        var ocrN = new FakeOcr(); var trN = new Tracker(ocrN, cfg) { RelayoutMs = 0 }; double tN = 0; trN.Reset(tN);
+        Run(trN, ocrN, Scene.Make(NamesA, PricesA), ref tN, 25);                       // 처음 화면 (새로고침 아님)
+        var b1 = (string[])PricesA.Clone(); b1[5] = "매진"; var sb1 = Scene.Make(NamesA, b1); sb1.Red.Add("매진");
+        Run(trN, ocrN, sb1, ref tN, 10);                                                // 결정 x10 390 구매 (+110)
+        Run(trN, ocrN, Scene.Make(NamesB, PricesB), ref tN, 15);                       // 새로고침 1
+        var b2 = (string[])PricesB.Clone(); b2[1] = "매진"; var sb2 = Scene.Make(NamesB, b2); sb2.Red.Add("매진");
+        Run(trN, ocrN, sb2, ref tN, 10);                                                // 코어 x20 41 구매 (40-41 = -1)
+        Run(trN, ocrN, Scene.Make(NamesA, PricesA), ref tN, 15);                       // 새로고침 2
+        var sn = trN.Snap();
+        Check(sn.Refreshes == 2 && sn.Bought == 2 && Math.Abs(sn.NetGain - (110 - 1 - 2 * 50)) < 1e-6,
+              $"새로고침 {sn.Refreshes}회, 구매 {sn.Bought}개, 순이익 {sn.NetGain}휘 (기대 {110 - 1 - 100})");
+
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);
         void Add(string t, double x, double y, double w, double hh = 14) => mixed.Items.Add(new TextItem(t, new Box(x, y, x + w, y + hh)));

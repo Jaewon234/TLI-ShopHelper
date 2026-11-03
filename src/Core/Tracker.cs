@@ -26,6 +26,8 @@ public sealed class Snapshot
     public double PageGain;
     public double? LatencyMs;
     public string Status = "";
+    public int Refreshes, Bought, UnknownBought;
+    public double NetGain;   // 휘석: 산 것들의 이득 합 − 새로고침 × 비용
 }
 
 /// <summary>
@@ -286,6 +288,24 @@ public sealed class Tracker
     }
 
     void Resolve(Frame f, Slot s, byte[] fp, byte[] pfp, double now)
+    {
+        var before = s.Card;
+        ResolveInner(f, s, fp, pfp, now);
+        // 팔던 칸이 매진으로 바뀜 = 구매
+        if (before is { Sold: false } && s.Card is { Sold: true }) NoteBought(before);
+    }
+
+    void NoteBought(Card c)
+    {
+        if (c.Status is Verdict.Good or Verdict.Bad && c.Diff is double d)
+        {
+            Bought++; BoughtGain += d;
+            Log?.Invoke($"구매: {c.Name} x{c.Qty} {c.Price}휘 → 이득 {d:+0.##;-0.##}휘");
+        }
+        else { UnknownBought++; Log?.Invoke($"구매 (이득 모름): {c.Name} x{c.Qty} {c.Price}휘"); }
+    }
+
+    void ResolveInner(Frame f, Slot s, byte[] fp, byte[] pfp, double now)
     {
         s.Pending = false;
         s.ChangeT = now;
@@ -557,8 +577,15 @@ public sealed class Tracker
         {
             pages++;
             sumGain += CurrentGain();
+            // 상점을 처음 열었을 때 화면(prev 없음)은 새로고침이 아님
+            if (prev != null) { Refreshes++; Log?.Invoke($"새로고침 감지 #{Refreshes} · {diff}칸 바뀜"); }
         }
     }
+
+    // ---------------- 순이익 (프로그램을 켠 뒤부터) ----------------
+    public int Refreshes, Bought, UnknownBought;
+    public double BoughtGain;   // 휘석
+    public void ResetProfit() { Refreshes = Bought = UnknownBought = 0; BoughtGain = 0; }
 
     double CurrentGain() => slots?.Where(s => s.Card?.Status == Verdict.Good).Sum(s => s.Card!.Diff!.Value) ?? 0;
 
@@ -575,5 +602,7 @@ public sealed class Tracker
         PageGain = CurrentGain(),
         LatencyMs = LastLatencyMs,
         Status = Status,
+        Refreshes = Refreshes, Bought = Bought, UnknownBought = UnknownBought,
+        NetGain = BoughtGain - Refreshes * cfg.RefreshCost,
     };
 }

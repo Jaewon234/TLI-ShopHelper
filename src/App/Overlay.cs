@@ -194,6 +194,7 @@ sealed class Overlay
         AppendMenuW(menu, 0, (UIntPtr)7, "시세 입력...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)11, "지금 화면 그대로 저장  (Ctrl+Shift+S)");
+        AppendMenuW(menu, 0, (UIntPtr)12, "순이익 초기화");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         var up = update;
@@ -225,6 +226,7 @@ sealed class Overlay
             case 7: OpenEditor(); break;
             case 5: Engine?.RequestSave(); break;
             case 11: SaveAsSeenLater(); break;   // 메뉴가 완전히 사라진 뒤에 찍음
+            case 12: Engine?.ResetProfit(); break;
             case 8: if (update != null) StartInstall(); else new Thread(() => CheckUpdate(manual: true)) { IsBackground = true }.Start(); break;
             case 10: cfg.CheckUpdates = !cfg.CheckUpdates; try { App.SaveSettings(cfg); } catch { } break;
             case 9: PostQuitMessage(0); break;
@@ -403,7 +405,11 @@ sealed class Overlay
     {
         try
         {
-            if (editor?.Handle(h, msg, w, l) is IntPtr handled) return handled;
+            if (editor?.Handle(h, msg, w, l) is IntPtr handled)
+            {
+                if (msg is 0x202 or 0x10 or 0x111) Render();   // 시세 창을 펼치거나 접으면 순이익 표시도 따라 옮김
+                return handled;
+            }
             if (progress.Handle(h, msg, w, l) is IntPtr handled2) return handled2;
             switch (msg)
             {
@@ -551,6 +557,28 @@ sealed class Overlay
                     break;
             }
         }
+        if (!popupOpen) DrawProfit(c, s, client, th);   // 구매 창 등이 열려 있으면 숨김
+    }
+
+    /// <summary>순이익 (시세 입력 버튼/창 바로 위): 산 것들의 이득 − 새로고침 × 휘석 50개</summary>
+    void DrawProfit(Canvas c, Snapshot s, (int X, int Y, int W, int H) client, double th)
+    {
+        if (editor?.AnchorScreenRect() is not { } a) return;
+        double sc = Math.Clamp(th / 20.0, 0.75, 1.5);
+        double crystal = PriceInput.CrystalPrice(cfg);
+        double net = s.NetGain / crystal;
+        string value = (net > 0 ? "+" : "") + net.ToString("0.##") + "결";
+        string sub = $"새로고침 {s.Refreshes}회 · 구매 {s.Bought}개" + (s.UnknownBought > 0 ? $" · 시세 없는 구매 {s.UnknownBought}개" : "");
+        var (vw, _) = c.Measure(value, 22 * sc, true);
+        var (lw, _) = c.Measure("순이익", 13 * sc, true);
+        var (sw, _) = c.Measure(sub, 12 * sc, false);
+        double w = Math.Max(lw + vw + 40 * sc, sw + 28 * sc), h = 62 * sc;
+        double x = a.X - client.X, y = a.Y - client.Y - 8 * sc - h;
+        c.FillRound(x, y, w, h, 12 * sc, Canvas.Argb(232, 14, 16, 22));
+        c.StrokeRound(x + 0.5, y + 0.5, w - 1, h - 1, 12 * sc, Canvas.Argb(40, 255, 255, 255), 1);
+        c.Text(x + 14 * sc, y + 12 * sc, "순이익", 13 * sc, true, Muted);
+        c.Text(x + 14 * sc + lw + 10 * sc, y + 6 * sc, value, 22 * sc, true, net > 0 ? Green : net < 0 ? Red : Txt);
+        c.Text(x + 14 * sc, y + 38 * sc, sub, 12 * sc, false, Dim);
     }
 
     string Efficiency(Card cd)
