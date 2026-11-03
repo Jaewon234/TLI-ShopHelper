@@ -40,6 +40,7 @@ public sealed class Tracker
         public byte[]? SettledFp, SettledPfp, PrevFp, PrevPfp;
         public Card? Card;
         public bool Pending;
+        public bool Stale;   // 다시 읽기에 실패해서 이전 결과를 보여주는 중 (계속 다시 시도)
         public double ChangeT;
     }
 
@@ -63,6 +64,20 @@ public sealed class Tracker
     public double? LastLatencyMs { get; private set; }
     public string Status { get; private set; } = "";
     public Action<string>? Log;
+    /// <summary>
+    /// 글자를 읽을 때만 쓰는 '깨끗한' 화면 (오버레이가 안 찍힌 것). null 이면 감시용 화면을 그대로 씀.
+    /// 감시(지문 비교)는 매 프레임 빠른 캡처로, 이건 새로고침 때 한 번 정도만 불림.
+    /// </summary>
+    public Func<Frame?>? CleanFrame;
+    Frame? clean;
+    bool cleanTried;
+
+    Frame Src(Frame f)
+    {
+        if (CleanFrame == null) return f;
+        if (!cleanTried) { cleanTried = true; clean = CleanFrame(); }
+        return clean ?? f;
+    }
 
     public const double StableMs = 40, MaxWaitMs = 400, RetryMs = 500;
 
@@ -89,6 +104,7 @@ public sealed class Tracker
     /// <summary>프레임 하나 처리. 화면에 보일 내용이 바뀌면 true.</summary>
     public bool Update(Frame f, double now)
     {
+        clean = null; cleanTried = false;
         if (f.W != frameW || f.H != frameH)
         {
             frameW = f.W; frameH = f.H;
@@ -108,7 +124,7 @@ public sealed class Tracker
             var fp = Fingerprint.Make(f, s.R);
             var pfp = Fingerprint.Make(f, s.PriceR);
             cellsAll = Fingerprint.Cells(fp);
-            if (!s.Pending && s.Card == null && now - s.ChangeT >= RetryMs)
+            if (!s.Pending && (s.Card == null || s.Stale) && now - s.ChangeT >= RetryMs)
             {
                 // 못 읽은 칸은 0.5초마다 다시 시도
                 s.Pending = true; s.ChangeT = now - StableMs; s.PrevFp = fp; s.PrevPfp = pfp;
@@ -168,6 +184,12 @@ public sealed class Tracker
             }
         }
         var card = OcrSlot(f, s);
+        if (card == null && s.Card != null)
+        {
+            s.Stale = true;          // 못 읽으면 이전 결과를 그대로 보여주고 다시 시도 (번쩍임 방지)
+            return;
+        }
+        s.Stale = false;
         s.Card = card;
         if (card != null)
         {
@@ -178,7 +200,7 @@ public sealed class Tracker
 
     Card? OcrSlot(Frame f, Slot s)
     {
-        var crop = f.Crop((int)s.R.X1, (int)s.R.Y1, (int)s.R.W, (int)s.R.H).AutoContrast();
+        var crop = Src(f).Crop((int)s.R.X1, (int)s.R.Y1, (int)s.R.W, (int)s.R.H).AutoContrast();
         double sc = Math.Min(cfg.SlotOcrScale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
         var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
         var lines = ocr.Recognize(img, s.R, sc);
@@ -196,7 +218,7 @@ public sealed class Tracker
     void FullScan(Frame f, double now)
     {
         int top = (int)(f.H * cfg.ScanRegion.Top), bottom = (int)(f.H * cfg.ScanRegion.Bottom);
-        var crop = f.Crop(0, top, f.W, Math.Max(1, bottom - top));
+        var crop = Src(f).Crop(0, top, f.W, Math.Max(1, bottom - top));
         double sc = Math.Min(cfg.OcrScale, ocr.MaxDim / (double)Math.Max(crop.W, crop.H));
         var img = Math.Abs(sc - 1) > 1e-6 ? crop.Scale(sc) : crop;
         var src = new Box(0, top, f.W, bottom);

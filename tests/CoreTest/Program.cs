@@ -83,10 +83,12 @@ sealed class FakeOcr : IOcr
 {
     public Scene Scene = new();
     public int Calls;
+    public bool Fail;   // 툴팁 등으로 글자를 못 읽는 상황
     public int MaxDim => 10000;
     public List<List<OcrWord>> Recognize(Frame img, Box src, double scale)
     {
         Calls++;
+        if (Fail) return new();
         var words = Scene.Items.Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
             .Select(t => new OcrWord(t.Text, (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
         // Windows OCR 처럼 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
@@ -178,6 +180,15 @@ static class T
         snap = tr.Snap();
         Check(ocr.Calls == 0, $"OCR 0번 - 실제 {ocr.Calls}");
         Check(snap.Slots[5].Card?.Price == 390 && snap.Slots[0].Card?.Price == 68 && snap.Slots[7].Card?.Price == 200, "결과 유지");
+
+        Console.WriteLine("[5b2] 다시 읽기에 실패해도 이전 결과 유지 (번쩍임 방지)");
+        var noisy = Scene.Make(NamesA, p); noisy.Items.Add(new TextItem("잡음", new Box(1090, 230, 1124, 244)));  // 결정 칸 이름 쪽에 무언가 겹침
+        ocr.Fail = true;
+        Run(tr, ocr, noisy, ref now, 10);
+        Check(tr.Snap().Slots[5].Card?.Price == 390, "실패 중에도 390 표시");
+        ocr.Fail = false;
+        Run(tr, ocr, noisy, ref now, 30);   // 0.5초 뒤 다시 시도해서 읽힘
+        Check(tr.Snap().Slots[5].Card?.Price == 390 && ocr.Calls > 0, "다시 시도해서 읽음");
 
         Console.WriteLine("[5c] 자동 대비");
         var dim = new Frame(4, 1);

@@ -56,7 +56,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.5.2";
+    public const string Version = "1.5.3";
 
     [STAThread]
     static int Main(string[] args)
@@ -197,6 +197,15 @@ sealed class Engine
         double lastFind = -1e9;
         bool shown = false;
         bool printWindowBroken = false;
+        IntPtr curHwnd = IntPtr.Zero; int curW = 0, curH = 0;
+        using var cleanGrab = new Grabber();
+        tracker.CleanFrame = () =>
+        {
+            if (overlay.CaptureExcluded == true || printWindowBroken || curHwnd == IntPtr.Zero) return null;
+            var cf = cleanGrab.GrabWindow(curHwnd, curW, curH);
+            if (cf == null) { printWindowBroken = true; App.Log("PrintWindow 가 검은 화면 → 화면 캡처로 읽음 (오버레이 글자는 OCR 에서 걸러냄)"); }
+            return cf;
+        };
         double lastCfgCheck = 0;
         while (true)
         {
@@ -244,13 +253,10 @@ sealed class Engine
             var (x, y, w, h) = rect.Value;
             var rows = tracker.Rows;
             // 오버레이가 캡처에서 빠지면 빠른 화면 캡처, 아니면 게임 창만 직접 받아옴 (오버레이 글자가 섞이지 않게)
-            Frame? frame = null;
-            if (overlay.CaptureExcluded != true && !printWindowBroken)
-            {
-                frame = grab.GrabWindow(hwnd, w, h);
-                if (frame == null) { printWindowBroken = true; App.Log("PrintWindow 가 검은 화면 → 화면 캡처 사용 (오버레이 글자는 OCR 에서 걸러냄)"); }
-            }
-            frame ??= rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
+            // 감시는 항상 빠른 화면 캡처 (게임을 건드리지 않음, 깜빡임 없음).
+            // 글자를 읽을 때만, 오버레이가 캡처에서 안 빠지는 PC 에서는 게임 창을 직접 받아옴 (PrintWindow).
+            curHwnd = hwnd; curW = w; curH = h;
+            var frame = rows is { } rr ? grab.Grab(x, y, w, h, rr.From, rr.To) : grab.Grab(x, y, w, h);
             bool dirty = tracker.Update(frame, now);
             if (dirty)
             {

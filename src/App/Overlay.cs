@@ -305,7 +305,8 @@ sealed class Overlay
         {
             var d = sl.D; var cd = sl.Card;
             double rr = th * 0.45;
-            if (sl.Pending) { c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.WithAlpha(Gold, 120), 1.5); continue; }
+            if (sl.Pending && cd == null) { c.StrokeRound(d.X1, d.Y1, d.W, d.H, rr, Canvas.WithAlpha(Gold, 120), 1.5); continue; }
+            // 다시 읽는 중에도 이전 결과를 그대로 그림 (사라졌다 나타나며 번쩍이지 않게)
             if (cd == null)
             {
                 c.Pill(d.Cx, d.Y1, "읽기 실패", small, true, darkBg, Muted);
