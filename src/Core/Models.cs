@@ -93,7 +93,7 @@ public sealed class Config
     [JsonPropertyName("scan_region")] public ScanRegion ScanRegion { get; set; } = new();
     [JsonPropertyName("ocr_scale")] public double OcrScale { get; set; } = 2.0;
     [JsonPropertyName("slot_ocr_scale")] public double SlotOcrScale { get; set; } = 2.5;
-    /// <summary>자동 읽기: 몇 초마다 모든 칸을 다시 읽는지 (0 = 끔). 기억해 둔 결과가 틀렸어도 바로잡음</summary>
+    /// <summary>자동 읽기: 몇 초마다 모든 칸을 다시 읽는지 (0.1~1초). 기억해 둔 결과가 틀렸어도 바로잡음</summary>
     [JsonPropertyName("reread_sec")] public double RereadSec { get; set; } = 1;
     /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
     [JsonPropertyName("ocr_engine")] public string OcrEngine { get; set; } = "auto";
@@ -259,6 +259,7 @@ public sealed class Config
         else changed = true;
         changed |= cfg.Migrate();
         if (changed) cfg.SavePrices(pricesPath);
+        if (cfg.RereadSec < 0.1 || cfg.RereadSec > 1) { cfg.RereadSec = cfg.RereadSec <= 0 ? 1 : Math.Clamp(cfg.RereadSec, 0.1, 1); cfg.SaveSettings(settingsPath); }
         if (!File.Exists(settingsPath)) cfg.SaveSettings(settingsPath);
         return cfg;
     }

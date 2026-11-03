@@ -195,16 +195,30 @@ sealed class Editor
     // ---------------- 배치 ----------------
     const int W = 400, Header = 58, RowH = 38, FieldX = 196, FieldW = 108, FieldH = 30;
     // 오른쪽 아래에 붙은 '자동 읽기' 칸
-    const int SideW = 150, SideGap = 10, SideH = 222;
-    static readonly (double sec, string label)[] Speeds = { (0.5, "0.5초마다"), (1, "1초마다"), (2, "2초마다"), (0, "끄기") };
+    const int SideW = 170, SideGap = 10, SideH = 150;
+    // 자동 읽기 슬라이더: 0.1초 ~ 1초 (0.1초 단위)
+    const double SpeedMin = 0.1, SpeedMax = 1.0;
+    bool dragging;
 
     (int x, int y, int w, int h) ButtonRect => (mainW - S(18) - S(104), footerY + S(12), S(104), S(38));
     (int x, int y, int w, int h) CloseRect => (mainW - S(38), S(16), S(22), S(22));
     (int x, int y, int w, int h) SideRect => (mainW + S(SideGap), winH - S(SideH), S(SideW), S(SideH));
-    (int x, int y, int w, int h) SpeedRect(int i)
+    /// <summary>슬라이더 트랙 (누르는 영역은 위아래로 넉넉히)</summary>
+    (int x, int y, int w, int h) TrackRect
     {
-        var (sx, sy, sw, _) = SideRect;
-        return (sx + S(12), sy + S(46) + i * S(38), sw - S(24), S(32));
+        get { var (sx, sy, sw, _) = SideRect; return (sx + S(22), sy + S(86), sw - S(44), S(6)); }
+    }
+    (int x, int y, int w, int h) SliderHit
+    {
+        get { var (tx, ty, tw, _) = TrackRect; return (tx - S(14), ty - S(16), tw + S(28), S(38)); }
+    }
+    double SpeedValue => Math.Clamp(cfg.RereadSec <= 0 ? SpeedMax : cfg.RereadSec, SpeedMin, SpeedMax);
+    void SetSpeedFromX(int x)
+    {
+        var (tx, _, tw, _) = TrackRect;
+        double v = SpeedMin + Math.Clamp((x - tx) / (double)tw, 0, 1) * (SpeedMax - SpeedMin);
+        v = Math.Round(v * 10) / 10;
+        if (Math.Abs(v - cfg.RereadSec) > 1e-9) { cfg.RereadSec = v; InvalidateRect(Hwnd, IntPtr.Zero, false); }
     }
 
     void Create(bool shop)
@@ -351,15 +365,19 @@ sealed class Editor
         c.StrokeRound(sx + 0.5, sy + 0.5, sw - 1, sh - 1, S(14), Border, 1);
         c.FillRect(sx + S(14), sy + S(16), S(4), S(18), Gold);
         c.Text(sx + S(24), sy + S(12), "자동 읽기", S(16), true, Txt);
-        for (int i = 0; i < Speeds.Length; i++)
-        {
-            var (x, y, w, h) = SpeedRect(i);
-            bool on = Math.Abs(cfg.RereadSec - Speeds[i].sec) < 1e-6;
-            c.FillRound(x, y, w, h, S(8), on ? Gold : Field);
-            var (lw, lh) = c.Measure(Speeds[i].label, S(14), on);
-            c.Text(x + (w - lw) / 2, y + (h - lh) / 2, Speeds[i].label, S(14), on, on ? GoldText : Txt);
-        }
-        c.Text(sx + S(14), sy + sh - S(26), "틀린 값을 바로잡음", S(12), false, Dim);
+        double v = SpeedValue;
+        c.Text(sx + S(22), sy + S(44), $"{v:0.0}초마다", S(18), true, Gold);
+        var (tx, ty, tw, th) = TrackRect;
+        double f = (v - SpeedMin) / (SpeedMax - SpeedMin);
+        c.FillRound(tx, ty, tw, th, th / 2.0, Field);
+        c.FillRound(tx, ty, Math.Max(th, tw * f), th, th / 2.0, Canvas.WithAlpha(Gold, 200));
+        double kx = tx + tw * f, ky = ty + th / 2.0, kr = S(9);
+        c.FillRound(kx - kr, ky - kr, kr * 2, kr * 2, kr, Gold);
+        c.StrokeRound(kx - kr, ky - kr, kr * 2, kr * 2, kr, Canvas.Argb(255, 30, 22, 0), 1.5);
+        c.Text(tx - S(6), ty + S(14), "0.1초", S(11), false, Dim);
+        var (mw, _) = c.Measure("1초", S(11), false);
+        c.Text(tx + tw - mw + S(4), ty + S(14), "1초", S(11), false, Dim);
+        c.Text(sx + S(14), sy + sh - S(24), "짧을수록 빨리 바로잡음", S(12), false, Dim);
     }
 
     void FieldBg(Canvas c, int x, int y, int w, string text, bool accent)
@@ -445,18 +463,26 @@ sealed class Editor
                 if (p.X < mainW && p.Y < S(Header - 6) && !(ShopMode == false && In(CloseRect, p.X, p.Y))) return new IntPtr(2); // 머리 = 끌어서 이동
                 return new IntPtr(1);
             }
+            case 0x201: // WM_LBUTTONDOWN: 슬라이더 잡기
+            {
+                int x = (short)(l.ToInt64() & 0xFFFF), y = (short)((l.ToInt64() >> 16) & 0xFFFF);
+                if (In(SliderHit, x, y)) { dragging = true; SetCapture(Hwnd); SetSpeedFromX(x); return IntPtr.Zero; }
+                break;
+            }
+            case 0x200: // WM_MOUSEMOVE: 끄는 중
+                if (dragging) { SetSpeedFromX((short)(l.ToInt64() & 0xFFFF)); return IntPtr.Zero; }
+                break;
             case WM_LBUTTONUP:
             {
                 int x = (short)(l.ToInt64() & 0xFFFF), y = (short)((l.ToInt64() >> 16) & 0xFFFF);
-                for (int i = 0; i < Speeds.Length; i++)
-                    if (In(SpeedRect(i), x, y))
-                    {
-                        cfg.RereadSec = Speeds[i].sec;
-                        try { App.SaveSettings(cfg); } catch { }
-                        App.Log("자동 읽기: " + Speeds[i].label);
-                        InvalidateRect(Hwnd, IntPtr.Zero, false);
-                        return IntPtr.Zero;
-                    }
+                if (dragging)
+                {
+                    dragging = false; ReleaseCapture();
+                    SetSpeedFromX(x);
+                    try { App.SaveSettings(cfg); } catch { }
+                    App.Log($"자동 읽기: {cfg.RereadSec:0.0}초마다");
+                    return IntPtr.Zero;
+                }
                 if (In(ButtonRect, x, y)) Apply();
                 else if (In(CloseRect, x, y)) { if (ShopMode) Collapse(); else Destroy(); }   // ✕ = 바꾼 값 버리고 접기/닫기
                 return IntPtr.Zero;
