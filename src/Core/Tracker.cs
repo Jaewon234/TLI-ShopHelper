@@ -105,6 +105,7 @@ public sealed class Tracker
         foreach (var s in new[] { slots[rescanIdx++] })
         {
             if (rescanIdx >= slots.Count) rescanIdx = -1;
+            if (s.Card is { Sold: true }) continue;   // 매진 칸은 다시 읽지 않음
             // 이미 읽은 칸은 숫자(가격·개수)만 다시 확인 (이름은 거의 안 틀리고, 숫자만 읽는 게 훨씬 빠름)
             if (s.Card is { Sold: false } cur)
             {
@@ -266,11 +267,36 @@ public sealed class Tracker
         return dirty;
     }
 
+    /// <summary>
+    /// 가격 줄에 빨간 '매진' 글자가 있는지 (OCR 없이 색으로). 가격 숫자는 흰색, 보석 아이콘은 보라색이라 구분됨.
+    /// </summary>
+    public static bool SoldByColor(Frame f, Box pr)
+    {
+        int x0 = Math.Max(0, (int)pr.X1), x1 = Math.Min(f.W, (int)pr.X2), y0 = Math.Max(0, (int)pr.Y1), y1 = Math.Min(f.H, (int)pr.Y2);
+        int red = 0, total = 0;
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x++)
+            {
+                int o = (y * f.W + x) * 4;
+                int b = f.Px[o], g = f.Px[o + 1], r = f.Px[o + 2];
+                total++;
+                if (r > 140 && r > g * 1.7 && r > b * 1.7) red++;
+            }
+        return total > 0 && red > total * 0.004;   // 실제 화면: 매진 칸 약 1.6%, 일반 칸 0%
+    }
+
     void Resolve(Frame f, Slot s, byte[] fp, byte[] pfp, double now)
     {
         s.Pending = false;
         s.ChangeT = now;
         s.SettledFp = fp; s.SettledPfp = pfp;
+        if (SoldByColor(f, s.PriceR))
+        {
+            // 매진: 판정할 것이 없으므로 OCR 없이 바로 건너뜀
+            s.Card = new Card { Name = s.Card?.Name ?? "", Qty = s.Card?.Qty ?? 1, Sold = true, Status = Verdict.Sold, Raw = "매진(색)" };
+            s.Stale = false; s.Fails = 0;
+            return;
+        }
         int cells = Fingerprint.Cells(fp);
         foreach (var e in cache)
         {
@@ -412,7 +438,8 @@ public sealed class Tracker
             if (s.Card != null)
                 cache.Add(new CacheEntry { Fp = s.SettledFp, Pfp = s.SettledPfp, Card = s.Card.Clone() });
             else
-                s.Pending = true; // 처음 스캔에서 못 읽은 칸은 칸 단위로 다시 읽음
+                s.Pending = !SoldByColor(f, s.PriceR); // 처음 스캔에서 못 읽은 칸은 칸 단위로 다시 읽음 (매진이면 건너뜀)
+            if (s.Card == null && !s.Pending) s.Card = new Card { Sold = true, Status = Verdict.Sold, Raw = "매진(색)" };
             s.ChangeT = now - MaxWaitMs;
         }
         Status = "";

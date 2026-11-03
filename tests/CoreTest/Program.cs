@@ -29,6 +29,7 @@ sealed class Scene
     }
 
     public Box? Hover;   // 마우스를 올린 카드 (어둡게)
+    public HashSet<string> Red = new();   // 빨간 글자로 그릴 글자 (매진)
 
     /// <summary>UI 최대 크기 스크린샷: 6개 + 2개 두 줄, 6번째 칸은 매진.</summary>
     public static Scene MakeBig(string[][] names, string[] prices)
@@ -65,7 +66,9 @@ sealed class Scene
                 for (int x = (int)it.B.X1; x < (int)it.B.X2; x++)
                 {
                     byte v = (byte)(rnd.Next(2) == 0 ? 20 : 235);
-                    int o = (y * f.W + x) * 4; f.Px[o] = v; f.Px[o + 1] = v; f.Px[o + 2] = v;
+                    int o = (y * f.W + x) * 4;
+                    if (Red.Contains(it.Text)) { f.Px[o] = 40; f.Px[o + 1] = 40; f.Px[o + 2] = (byte)Math.Max(v, (byte)60); }
+                    else { f.Px[o] = v; f.Px[o + 1] = v; f.Px[o + 2] = v; }
                 }
         }
         if (Hover is Box hb)   // 게임처럼 카드 전체를 회색 쪽으로 어둡게: p' = 0.6p + 40
@@ -157,6 +160,7 @@ static class T
             Console.WriteLine($"== {Path.GetFileName(file)} {w}x{h} · 처리 {sw.ElapsedMilliseconds}ms");
             Console.Write(Parser.Describe(tr.Snap().Slots.Select(x => x.Card), cfg));
             var d0 = tr.Snap().Slots[0].D; Console.WriteLine($"    첫 칸 테두리: x {d0.X1:0}~{d0.X2:0}, y {d0.Y1:0}~{d0.Y2:0}");
+            Console.WriteLine("    색으로 본 매진: " + string.Join(" ", tr.Snap().Slots.Select((x, i) => $"{i + 1}:{(Tracker.SoldByColor(f, new Box(x.R.X1, x.R.Y2 - (x.R.Y2 - x.R.Y1) * 0.27, x.R.X2, x.R.Y2)) ? "매진" : "-")}")));
         }
         return 0;
     }
@@ -348,6 +352,15 @@ static class T
             if (withEn) Check(s9.Slots[5].Card?.Qty == 60 && s9.Slots[7].Card?.Price == 200 && s9.Slots[7].Card?.Diff == 0, "영어 OCR 있음: " + got);
             else Console.WriteLine("    (영어 OCR 없으면: " + got + ")");
         }
+
+        Console.WriteLine("[5g] 구매해서 빨간 '매진' 이 뜨면 OCR 없이 건너뜀");
+        var ocrS = new FakeOcr(); var trS = new Tracker(ocrS, cfg) { RelayoutMs = 0 }; double tS = 0; trS.Reset(tS);
+        Run(trS, ocrS, Scene.Make(NamesA, PricesA), ref tS, 25);
+        var bought = (string[])PricesA.Clone(); bought[5] = "매진";
+        var sceneS = Scene.Make(NamesA, bought); sceneS.Red.Add("매진");
+        ocrS.Calls = 0;
+        Run(trS, ocrS, sceneS, ref tS, 10);
+        Check(trS.Snap().Slots[5].Card?.Status == Verdict.Sold && ocrS.Calls == 0, $"6번 칸 매진 처리, OCR {ocrS.Calls}번");
 
         Console.WriteLine("[5e] 오버레이 글자가 캡처에 섞여도 (스크린샷 찐빠 재현)");
         var mixed = Scene.Make(NamesA, PricesA);
