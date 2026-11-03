@@ -92,6 +92,7 @@ sealed class Overlay
 
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
+        App.Log($"오버레이 창 {(hwnd != IntPtr.Zero ? "생성됨" : "생성 실패 (오류 " + Marshal.GetLastWin32Error() + ")")} · 아이콘 {(small != IntPtr.Zero ? "exe" : "기본")}");
         SetLayeredWindowAttributes(hwnd, KEY, 0, LWA_COLORKEY);
         if (!SetWindowDisplayAffinity(hwnd, 0x11)) App.Log("캡처 제외 설정 실패 (Windows 10 2004 이상 필요)");
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
@@ -99,6 +100,7 @@ sealed class Overlay
         msgWnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, "ShopHelperTray", WS_POPUP, 0, 0, 0, 0,
             IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
         AddTray();
+        App.Log("트레이 아이콘 등록");
         if (!RegisterHotKey(msgWnd, 1, 0x2 | 0x4 | 0x4000, 0x50)) App.Log("단축키 Ctrl+Shift+P 등록 실패 (다른 프로그램이 사용 중)");
         editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
         editor.Init("ShopHelperEditor", inst);
@@ -111,6 +113,7 @@ sealed class Overlay
             TranslateMessage(ref m);
             DispatchMessageW(ref m);
         }
+        App.Log("종료 (메시지 루프 끝)");
         RemoveTray();
     }
 

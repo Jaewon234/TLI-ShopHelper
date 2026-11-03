@@ -35,17 +35,39 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
+    public const string Version = "1.4.1";
+
     [STAThread]
     static int Main(string[] args)
     {
-        SetProcessDpiAwarenessContext(new IntPtr(-4)); // Per-monitor v2
         try { File.WriteAllText(LogPath, ""); } catch { }
+        // 어떤 스레드에서든 처리 못 한 오류가 나면: 로그에 남기고 창으로 알려준 뒤 종료
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            Log("CRASH: " + e.ExceptionObject);
+            Error("오류로 종료됩니다.\n\n" + (e.ExceptionObject as Exception)?.Message +
+                  "\n\nShopHelper.exe 옆의 helper.log 내용을 보내주세요.");
+        };
+        try { return Run(args); }
+        catch (Exception e)
+        {
+            Log("CRASH(main): " + e);
+            Error("오류로 종료됩니다.\n\n" + e.Message + "\n\nShopHelper.exe 옆의 helper.log 내용을 보내주세요.");
+            return 1;
+        }
+    }
+
+    static int Run(string[] args)
+    {
+        Log($"시작 v{Version} · {Environment.OSVersion} · {Environment.ProcessPath}");
+        SetProcessDpiAwarenessContext(new IntPtr(-4)); // Per-monitor v2
         Config cfg;
         try { cfg = Config.Load(ConfigPath); }
         catch (Exception e) { Error("config.json 을 읽을 수 없습니다:\n" + e.Message); return 1; }
 
+        Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
         WinOcr ocr;
-        try { ocr = new WinOcr(); }
+        try { ocr = new WinOcr(); Log("OCR 준비됨 (최대 " + ocr.MaxDim + "px)"); }
         catch (Exception e) { Error(e.Message); return 1; }
 
         // 스크린샷을 exe 위로 끌어다 놓거나 --image 파일
@@ -130,7 +152,23 @@ sealed class Engine
 
     void Run()
     {
-        new Thread(FindLogLoop) { IsBackground = true }.Start();
+        // 엔진에서 오류가 나도 프로그램이 꺼지지 않게: 로그에 남기고 다시 시작
+        while (true)
+        {
+            try { Loop(); }
+            catch (Exception e) { App.Log("엔진 오류 (1초 뒤 다시 시작): " + e); Thread.Sleep(1000); }
+        }
+    }
+
+    bool logThreadStarted;
+
+    void Loop()
+    {
+        if (!logThreadStarted)
+        {
+            logThreadStarted = true;
+            new Thread(() => { try { FindLogLoop(); } catch (Exception e) { App.Log("로그 검색 오류: " + e); } }) { IsBackground = true }.Start();
+        }
         using var grab = new Grabber();
         IntPtr hwnd = IntPtr.Zero;
         double lastFind = -1e9;
