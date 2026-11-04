@@ -276,7 +276,7 @@ sealed class Engine
                     notified = true;
                     overlay.Notify("신들의 강복 도우미 실행 중", $"로그를 찾았습니다 ({how}).\n상점을 열면 자동으로 켜집니다.");
                 }
-                cur = new LogWatcher(path, OnShop) { OnView = OnView };
+                cur = new LogWatcher(path, OnShop) { OnView = OnView, OnXchg = overlay.OnXchg };
                 cur.Start();
             }
             else if (path == null && cur == null) LogInfo = "로그를 못 찾음 · 게임을 켜면 다시 찾습니다";

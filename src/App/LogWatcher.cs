@@ -9,6 +9,9 @@ sealed class LogWatcher
     readonly Action<bool> onChange;
     /// <summary>상점 말고 다른 창이 열리고 닫힐 때 (이름, 열림)</summary>
     public Action<string, bool>? OnView;
+    /// <summary>거래소 가격 검색 결과 (스킬 레벨업 계산기 [기록] 용). 로그 스레드에서 불림</summary>
+    public Action<XchgResult>? OnXchg;
+    readonly XchgParser xchg = new();
     public bool IsOpen { get; private set; }
 
     public LogWatcher(string path, Action<bool> onChange) { this.path = path; this.onChange = onChange; }
@@ -85,6 +88,10 @@ sealed class LogWatcher
     void Handle(string line)
     {
         if (stopped) return;
+        if (OnXchg != null && line.Length > 0 && xchg.Feed(line) is { } xr)
+        {
+            try { OnXchg(xr); } catch (Exception e) { App.Log("가격 검색 처리 오류: " + e.Message); }
+        }
         var (ev, name) = LogLine.Parse(line);
         switch (ev)
         {

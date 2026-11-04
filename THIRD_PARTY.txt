@@ -8,3 +8,7 @@
   https://github.com/microsoft/onnxruntime · MIT License
 
 - 자동 업데이트 방식과 일부 구조는 TartarusSolver(MIT, Artem Gurevich)를 참고
+
+- 부귀·숭고 스킬 이름표 (스킬 번호 → 한국어 이름)
+  tlidb.com (https://tlidb.com/ko/Noble_Support_Skill, https://tlidb.com/ko/Magnificent_Support_Skill) 의 공개 페이지에서 정리
+  스킬 이름과 번호는 게임 Torchlight: Infinite 의 데이터입니다

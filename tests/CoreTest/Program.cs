@@ -557,25 +557,61 @@ static class T
 
         Console.WriteLine("\n[스킬 레벨업 계산]");
         {
-            var r = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 10, 4, 3 }, 2, 500);
-            Check(r.Enough && r.Buy.SequenceEqual(new[] { 0, 4, 3 }) && r.Points == 50 && r.SkillCost == 4900 && r.Total == 6400,
-                $"매물 안에서 최저 조합: 1티어 4 + 0티어 3 = 4,900 (+영감 1,000 + 베이스 500 = 6,400) - {string.Join(",", r.Buy)} {r.SkillCost} {r.Total}");
-            var all = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 99, 99, 99 }, 0, 0);
-            Check(all.Buy.SequenceEqual(new[] { 0, 10, 0 }) && all.SkillCost == 1000, $"매물이 넉넉하면 1티어 10개 = 1,000 - {string.Join(",", all.Buy)} {all.SkillCost}");
-            var mix = SkillCalc.Compute(new double?[] { 10, 100, 1000 }, new[] { 99, 99, 99 }, 0, 0);
-            Check(mix.Buy.SequenceEqual(new[] { 25, 0, 0 }) && mix.SkillCost == 250, $"2티어가 싸면 2티어 25개 - {string.Join(",", mix.Buy)} {mix.SkillCost}");
-            var over = SkillCalc.Compute(new double?[] { 30, 100, null }, new[] { 2, 99, 0 }, 0, 0);
-            Check(over.Enough && over.Points >= 50 && over.SkillCost == 1000, $"넘치게 채우는 것도 비교 (2티어 2개+1티어 10개보다 1티어 10개) - {string.Join(",", over.Buy)} {over.SkillCost}");
-            var lack = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 3, 4, 2 }, 0, 0);
+            static List<double> Rep(double p, int n) => Enumerable.Repeat(p, n).ToList();
+            // 18:10 실제 검색 매물 (작열 유성: 여파)
+            var t0 = new List<double> { 110, 120, 120, 120, 120, 130, 145, 177, 177, 177, 188, 188, 200, 254, 255, 300, 308, 308, 369, 380, 399, 400, 400, 480, 555, 666, 777, 788, 800, 900, 933, 950, 999, 1500, 1999, 2222, 2400 };
+            var t1 = new List<double> { 45, 46, 48, 48, 50, 50, 50, 50, 53, 448 };
+            var t2 = new List<double> { 14, 15, 15, 16, 18, 20, 25, 28, 39, 40, 40, 50 };
+            var r = SkillCalc.Compute(new IReadOnlyList<double>?[] { t0, t1, t2 }, 2, 500);
+            Check(r.Enough && r.Buy.SequenceEqual(new[] { 0, 8, 5 }) && r.Points == 50 && r.SkillCost == 465 && r.TierCost[1] == 387 && r.TierCost[2] == 78 && r.Total == 1965,
+                $"실제 매물: 1티어 8개(387) + 2티어 5개(78) = 465, +영감 1,000 +베이스 500 = 1,965 - {string.Join(",", r.Buy)} {r.SkillCost} {r.Total}");
+            // 넘기는 게 더 싼 경우: 1티어 20결 9개뿐, 2티어 30결 넉넉 → 1티어 9 + 2티어 3 = 51 (270)
+            var over = SkillCalc.Compute(new IReadOnlyList<double>?[] { null, Rep(20, 9), Rep(30, 40) }, 0, 0);
+            Check(over.Enough && over.Buy.SequenceEqual(new[] { 0, 9, 3 }) && over.Points == 51 && over.SkillCost == 270, $"50 을 넘겨도 더 싸면 그 조합 (51/50, 270) - {string.Join(",", over.Buy)} {over.Points} {over.SkillCost}");
+            var cheap2 = SkillCalc.Compute(new IReadOnlyList<double>?[] { Rep(1000, 9), Rep(100, 9), Rep(10, 30) }, 0, 0);
+            Check(cheap2.Buy.SequenceEqual(new[] { 0, 0, 25 }) && cheap2.SkillCost == 250, $"2티어가 싸면 2티어 25개 - {string.Join(",", cheap2.Buy)} {cheap2.SkillCost}");
+            var lack = SkillCalc.Compute(new IReadOnlyList<double>?[] { Rep(1500, 2), Rep(100, 4), Rep(1000, 3) }, 0, 0);
             Check(!lack.Enough && lack.Points == 46 && lack.SkillCost == 3000 + 400 + 3000, $"매물이 모자라면 부족 (46/50) - {lack.Points} {lack.SkillCost}");
-            var noPrice = SkillCalc.Compute(new double?[] { null, 100, null }, new[] { 50, 10, 50 }, 0, 0);
-            Check(noPrice.Buy.SequenceEqual(new[] { 0, 10, 0 }), "가격을 안 넣은 티어는 매물 없음으로 봄");
+            var none = SkillCalc.Compute(new IReadOnlyList<double>?[] { null, null, null }, 0, 0);
+            Check(!none.Enough && none.Points == 0 && none.SkillCost == 0, "기록 없음 = 매물 없음");
+            var unsorted = SkillCalc.Compute(new IReadOnlyList<double>?[] { new List<double> { 500, 100, 300, 200, 400 }, null, null }, 0, 0);
+            Check(unsorted.SkillCost == 1500 && unsorted.Buy[0] == 5, "가격 순서가 섞여 와도 싼 것부터");
         }
+
+        Console.WriteLine("\n[거래소 가격 검색 로그 해석]");
+        {
+            string P = "[2026.11.04-18.10.13:851][120]TLNetGame: Display: [Game] ";
+            string[] lines = {
+                P + "----Socket SendMessage STT----XchgSearchPrice----SynId = 1888", P,
+                "+filters+1+key [4]", "|       | +refer [8129]", "|       +2+key [5]", "|       | +params+1+max [-14]", "|       | |      | +min [-15]",
+                "|       | +refer [825739_d1_mt30]", "+typ3 [62]", P + "----Socket SendMessage End----",
+                P + "TLGame: Display: [Game] UIButton@ normal-click TradeQueryButton",
+                P + "----Socket RecvMessage STT----XchgSearchPrice----SynId = 1888", P,
+                "+itemGoldId [8129]", "+prices+1+unitPrices+1 [45.0]", "|      | |          +2 [46.0]", "|      | |          +3 [48.0]",
+                "|      | +currency [100300]", "+errCode", P + "----Socket RecvMessage End----",
+            };
+            var xp = new XchgParser(); XchgResult? got = null; int n = 0;
+            foreach (var l in lines) if (xp.Feed(l) is { } x) { got = x; n++; }
+            Check(n == 1 && got!.ItemId == "8129" && got.Prices.SequenceEqual(new[] { 45.0, 46, 48 }) && got.Currency == "100300", $"스킬 검색 결과: 8129, 45/46/48 - {got?.ItemId} {string.Join("/", got?.Prices ?? new())}");
+            // 결과에 itemGoldId 가 없으면 요청의 refer 를 씀 (재료 검색)
+            string[] mat = {
+                P + "----Socket SendMessage STT----XchgSearchPrice----SynId = 1362", P, "+filters+1+key [4]", "|       | +refer [200028]", "+typ3 [44]", P + "----Socket SendMessage End----",
+                P + "----Socket RecvMessage STT----XchgSearchPrice----SynId = 1362", P, "+prices+1+unitPrices+1 [0.07]", "|      | |          +2 [0.070446735395189]",
+                "|      | +currency [100300]", "+errCode", P + "----Socket RecvMessage End----",
+            };
+            got = null; foreach (var l in mat) if (xp.Feed(l) is { } x) got = x;
+            Check(got != null && got.ItemId == "200028" && got.Prices.Count == 2 && Math.Abs(got.Prices[1] - 0.070446735395189) < 1e-12, $"재료 검색 결과: 요청의 refer 200028 - {got?.ItemId} {got?.Prices.Count}");
+            got = null; foreach (var l in new[] { P + "----Socket RecvMessage STT----XchgSearchPrice----SynId = 5", "+errCode", P + "----Socket RecvMessage End----" }) if (xp.Feed(l) is { } x) got = x;
+            Check(got != null && got.Prices.Count == 0, "매물이 하나도 없으면 빈 목록");
+            Check(SkillNames.Find("8129") == "작열 유성: 여파(숭고)" && SkillNames.Table.Count >= 300, $"이름표: 8129 = {SkillNames.Find("8129")} (전체 {SkillNames.Table.Count}개)");
+            Check(SkillNames.Find("8129", new Dictionary<string, string> { ["8129"] = "내 이름" }) == "내 이름" && SkillNames.Find("999999") == null, "직접 적은 이름이 먼저, 모르는 번호는 null");
+        }
+
         {
             var calcTmp = Path.Combine(Path.GetTempPath(), "calc_test.json");
-            var st = new CalcState(); st.Craft.Level = 86; st.Craft.T1[1] = 3; st.Skill.Prices[2] = 1500; st.Save(calcTmp);
+            var st = new CalcState(); st.Craft.Level = 86; st.Craft.T1[1] = 3; st.Skill.Listings[2] = new() { 14, 15 }; st.Skill.SkillId = "8129"; st.Save(calcTmp);
             var back = CalcState.Load(calcTmp);
-            Check(back.Craft.Level == 86 && back.Craft.T1[1] == 3 && back.Skill.Prices[2] == 1500 && back.Recipes[100][2].T0!.Fossil == 6, "계산기 입력값 저장·읽기");
+            Check(back.Craft.Level == 86 && back.Craft.T1[1] == 3 && back.Skill.Listings[2]![1] == 15 && back.Skill.SkillId == "8129" && back.Skill.Listings[0] == null && back.Recipes[100][2].T0!.Fossil == 6, "계산기 입력값 저장·읽기");
             File.WriteAllText(calcTmp, "{ \"craft\": { \"t1\": [1] } }");
             var bad = CalcState.Load(calcTmp);
             Check(bad.Craft.T1.Length == 3 && bad.Craft.T1[0] == 1 && bad.Recipes.ContainsKey(100), "손으로 고친 짧은 파일도 읽음");

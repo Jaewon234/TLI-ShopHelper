@@ -416,6 +416,13 @@ sealed class Overlay
         catch (Exception e) { App.Log("화면 저장 실패: " + e); Notify("저장 실패", e.Message); }
     }
 
+    /// <summary>로그 스레드: 거래소 가격 검색 결과 → 스킬 레벨업 계산기 (UI 스레드에서)</summary>
+    public void OnXchg(XchgResult r)
+    {
+        App.Log($"가격 검색 결과: 아이템 {r.ItemId ?? "?"} · 매물 {r.Prices.Count}개");
+        OnUi(() => { try { skillWin?.OnSearch(r); } catch (Exception e) { App.Log("스킬 레벨업 기록 오류: " + e); } });
+    }
+
     bool CalcDialogMessage(ref MSG m)
     {
         foreach (var w in CalcWins)

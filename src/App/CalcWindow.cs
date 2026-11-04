@@ -47,7 +47,7 @@ abstract class CalcWindow
     /// <summary>입력칸 하나: 자리(논리 좌표), 정렬, 금색 테두리(가끔 바꾸는 값)</summary>
     protected sealed class Input
     {
-        public IntPtr Edit; public int X, Y, Wd; public bool Accent, Center; public bool Off;
+        public IntPtr Edit; public int X, Y, Wd; public bool Accent, Center; public bool Off, Hidden;
     }
     protected readonly List<Input> boxes = new();
 
@@ -77,7 +77,7 @@ abstract class CalcWindow
         loading = true;
         boxes.Clear();
         Build();
-        if (Pos.Collapsed) foreach (var b in boxes) ShowWindow(b.Edit, SW_HIDE);
+        foreach (var b in boxes) if (Pos.Collapsed || b.Hidden) ShowWindow(b.Edit, SW_HIDE);
         loading = false;
         Recalc();
         ShowWindow(Hwnd, SW_SHOWNOACTIVATE);   // 열 때도 게임 포커스를 뺏지 않음
@@ -133,15 +133,15 @@ abstract class CalcWindow
 
     // ---------------- 입력칸 ----------------
     /// <summary>논리 좌표 (x, y, 폭) 의 칸 배경 안쪽에 테두리 없는 EDIT 를 넣음</summary>
-    protected Input AddBox(int x, int y, int w, string text, bool accent, bool center, int? decimals, string? digits = null, int limit = 0)
+    protected Input AddBox(int x, int y, int w, string text, bool accent, bool center, int? decimals, string? digits = null, int limit = 0, bool plainText = false)
     {
         int eh = S(20);
-        uint style = (uint)(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | (center ? ES_CENTER : ES_RIGHT));
+        uint style = (uint)(WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL | (plainText ? 0 : center ? ES_CENTER : ES_RIGHT));
         var e = CreateWindowExW(0, "EDIT", text, unchecked((int)style), S(x) + S(10), S(y) + (S(FH) - eh) / 2, S(w) - S(20), eh,
             Hwnd, new IntPtr(1000 + boxes.Count), IntPtr.Zero, IntPtr.Zero);
         SendMessageW(e, WM_SETFONT, font, new IntPtr(1));
         if (limit > 0) SendMessageW(e, EM_LIMITTEXT, new IntPtr(limit), IntPtr.Zero);
-        NumericEdit.Attach(e, decimals, digits);
+        if (!plainText) NumericEdit.Attach(e, decimals, digits);
         var b = new Input { Edit = e, X = x, Y = y, Wd = w, Accent = accent, Center = center };
         boxes.Add(b);
         return b;
@@ -152,7 +152,15 @@ abstract class CalcWindow
     {
         if (b.Off == off) return;
         b.Off = off;
-        ShowWindow(b.Edit, off ? SW_HIDE : SW_SHOWNOACTIVATE);
+        ShowWindow(b.Edit, off || b.Hidden || Pos.Collapsed ? SW_HIDE : SW_SHOWNOACTIVATE);
+    }
+
+    /// <summary>칸을 통째로 숨김 (배경도 안 그림)</summary>
+    protected void SetHidden(Input b, bool hidden)
+    {
+        if (b.Hidden == hidden) return;
+        b.Hidden = hidden;
+        ShowWindow(b.Edit, hidden || Pos.Collapsed ? SW_HIDE : SW_SHOWNOACTIVATE);
     }
 
     protected static string Text(IntPtr h)
@@ -205,8 +213,11 @@ abstract class CalcWindow
         c.StrokeRound(0.5, 0.5, S(W) - 1, h - 1, S(14), Border, 1);
         c.FillRect(S(18), S(18), S(4), S(20), Gold);
         c.Text(S(30), S(13), Title, S(20), true, Txt);
-        var (tw, _) = c.Measure(Title, S(20), true);
-        c.Text(S(30) + tw + S(12), S(20), Subtitle, S(13), false, Dim);
+        if (Subtitle.Length > 0)
+        {
+            var (tw, _) = c.Measure(Title, S(20), true);
+            c.Text(S(30) + tw + S(12), S(20), Subtitle, S(13), false, Dim);
+        }
         {
             var (x, y, w, hh) = FoldRect;   // ▁ / ▢
             if (Pos.Collapsed) c.StrokeRound(x + S(8), y + S(8), w - S(16), hh - S(16), S(2), Muted, 1.4);
@@ -218,6 +229,7 @@ abstract class CalcWindow
         if (Pos.Collapsed) return;
         foreach (var b in boxes)
         {
+            if (b.Hidden) continue;
             if (b.Off)
             {
                 c.FillRound(S(b.X), S(b.Y), S(b.Wd), S(FH), S(8), FieldOff);
@@ -314,7 +326,7 @@ abstract class CalcWindow
                 }
                 // 입력칸 배경(글자 바깥 여백)을 눌러도 그 칸으로
                 foreach (var b in boxes)
-                    if (!b.Off && InLogical(b.X, b.Y, b.Wd, FH, mx, my)) { SetForegroundWindow(Hwnd); SetFocus(b.Edit); return IntPtr.Zero; }
+                    if (!b.Off && !b.Hidden && InLogical(b.X, b.Y, b.Wd, FH, mx, my)) { SetForegroundWindow(Hwnd); SetFocus(b.Edit); return IntPtr.Zero; }
                 return IntPtr.Zero;
             case WM_MOUSEMOVE:
                 if (dragging)
@@ -331,7 +343,7 @@ abstract class CalcWindow
                     Pos.Collapsed = !Pos.Collapsed;
                     SetWindowPos(Hwnd, HWND_TOPMOST, 0, 0, S(W), CurH, 0x2 /*NOMOVE*/ | SWP_NOACTIVATE);
                     Shape();
-                    foreach (var b in boxes) if (!b.Off) ShowWindow(b.Edit, Pos.Collapsed ? SW_HIDE : SW_SHOWNOACTIVATE);
+                    foreach (var b in boxes) if (!b.Off && !b.Hidden) ShowWindow(b.Edit, Pos.Collapsed ? SW_HIDE : SW_SHOWNOACTIVATE);
                     save();
                     InvalidateRect(Hwnd, IntPtr.Zero, false);
                     return IntPtr.Zero;
@@ -369,7 +381,7 @@ sealed class CraftWindow : CalcWindow
     CalcState.CraftState St => state.Craft;
     protected override int H => 560;
     protected override string Title => "제작비 계산";
-    protected override string Subtitle => "결정 기준 · 1회 레시피";
+    protected override string Subtitle => "";
     protected override CalcState.WinPos Pos => St.Window;
 
     Input corr = null!, fossil = null!, baseB = null!;
@@ -515,19 +527,23 @@ sealed class CraftWindow : CalcWindow
     }
 }
 
-/// <summary>부귀·숭고 스킬 레벨업: 재료 스킬 매물로 상승치 50 을 가장 싸게 채우는 조합 + 영감 재료 ×500 + 베이스</summary>
+/// <summary>
+/// 부귀·숭고 스킬 레벨업: 티어별 [기록] 을 누르고 게임에서 가격 검색하면, 그 결과(로그의 매물 가격 목록)가 그 티어에 들어감.
+/// 기록한 매물 안에서 상승치 50 이상을 가장 싸게 채우는 조합 + 영감 재료 ×500 + 베이스 비용.
+/// </summary>
 sealed class SkillWindow : CalcWindow
 {
     readonly CalcState state;
     CalcState.SkillState St => state.Skill;
-    protected override int H => 520;
+    protected override int H => 570;
     protected override string Title => "스킬 레벨업";
     protected override string Subtitle => $"부귀·숭고 · 상승치 {SkillCalc.Need}";
     protected override CalcState.WinPos Pos => St.Window;
 
-    readonly Input[] price = new Input[3], count = new Input[3];
-    Input insp = null!, baseB = null!;
+    Input insp = null!, baseB = null!, nameB = null!;
     SkillCalc.Result? res;
+    /// <summary>[기록] 을 눌러 다음 검색을 기다리는 티어 (-1 = 없음)</summary>
+    int armed = -1;
 
     public SkillWindow(string cls, IntPtr inst, Func<(int X, int Y, int W, int H)?> gameRect, CalcState state, Action save)
         : base(cls, inst, gameRect, save) { this.state = state; }
@@ -535,75 +551,163 @@ sealed class SkillWindow : CalcWindow
     /// <summary>처음 위치: 제작비 계산 창 왼쪽 (둘 다 열어도 안 겹치게)</summary>
     protected override (int, int) DefaultPos((int X, int Y, int W, int H) a, int w) => (a.X + a.W - w * 2 - S(28), a.Y + S(90));
 
-    const int RowsY = 88, RowStep = 38;
+    // 배치 (논리 좌표)
+    const int RowY = 144, RowStep = 38, BtnX = 318, BtnW = 64, ComboY = 280, CostY = 346, InspY = 380, BaseY = 418;
+    static int RowCy(int i) => RowY + i * RowStep;
 
     protected override void Build()
     {
-        for (int i = 0; i < 3; i++)
+        nameB = AddBox(150, 61, 140, "", false, false, null, limit: 40, plainText: true);
+        insp = AddBox(196, InspY, 90, Fmt4(St.Inspiration), true, false, 4, limit: 12);
+        baseB = AddBox(196, BaseY, 90, Fmt4(St.Base), true, false, 4, limit: 14);
+        armed = -1;
+        UpdateNameBox();
+    }
+
+    /// <summary>이름표에 없는 스킬이면 이름 칸을 보여 줌 (한 번 적으면 기억)</summary>
+    void UpdateNameBox()
+    {
+        var id = St.SkillId;
+        bool unknown = !string.IsNullOrEmpty(id) && !SkillNames.Table.ContainsKey(id);
+        if (unknown) SetBoxText(nameB, St.Names.TryGetValue(id!, out var n) ? n : "");
+        SetHidden(nameB, !unknown);
+    }
+
+    /// <summary>게임에서 가격 검색 결과가 로그에 찍힘 (UI 스레드). [기록] 을 누른 티어가 있을 때만 받음</summary>
+    public void OnSearch(XchgResult r)
+    {
+        if (!IsOpen || armed < 0) return;
+        int t = armed; armed = -1;
+        if (!string.IsNullOrEmpty(r.ItemId) && r.ItemId != St.SkillId)
         {
-            int y = RowsY + i * RowStep;
-            price[i] = AddBox(140, y, 112, Fmt4(St.Prices[i]), true, false, 4, limit: 12);
-            count[i] = AddBox(266, y, 48, St.Counts[i] > 0 ? St.Counts[i].ToString() : "", false, true, 0, limit: 2);
+            // 다른 스킬: 이전 스킬의 다른 티어 매물이 섞이지 않게 비움
+            for (int i = 0; i < 3; i++) { St.Listings[i] = null; St.RecordedAt[i] = null; }
+            St.SkillId = r.ItemId;
         }
-        insp = AddBox(196, 318, 90, Fmt4(St.Inspiration), true, false, 4, limit: 12);
-        baseB = AddBox(196, 356, 90, Fmt4(St.Base), true, false, 4, limit: 14);
+        St.Listings[t] = r.Prices.ToList();
+        St.RecordedAt[t] = DateTime.Now;
+        App.Log($"스킬 레벨업 {SkillCalc.Tiers[t]} 기록: 스킬 {r.ItemId} 매물 {r.Prices.Count}개");
+        UpdateNameBox();
+        save();
+        Recalc();
     }
 
     protected override void ReadInputs()
     {
-        for (int i = 0; i < 3; i++) { St.Prices[i] = Num(price[i]); St.Counts[i] = Int(count[i]); }
         St.Inspiration = Num(insp); St.Base = Num(baseB);
+        if (!nameB.Hidden && !string.IsNullOrEmpty(St.SkillId))
+        {
+            var n = Text(nameB.Edit).Trim();
+            if (n.Length > 0) St.Names[St.SkillId!] = n; else St.Names.Remove(St.SkillId!);
+        }
         save();
     }
 
     protected override void Compute() =>
-        res = SkillCalc.Compute(St.Prices, St.Counts, St.Inspiration ?? 0, St.Base ?? 0);
+        res = SkillCalc.Compute(St.Listings, St.Inspiration ?? 0, St.Base ?? 0);
+
+    protected override bool Click(int x, int y)
+    {
+        for (int i = 0; i < 3; i++)
+            if (InLogical(BtnX, RowCy(i) - 14, BtnW, 28, x, y))
+            {
+                armed = armed == i ? -1 : i;   // 다시 누르면 취소, 다른 티어를 누르면 그쪽으로
+                return true;
+            }
+        return false;
+    }
 
     protected override void DrawBody(Canvas c)
     {
-        int hy = 72;
+        // 기록한 스킬
+        c.FillRound(S(18), S(56), S(W - 36), S(40), S(10), FieldOff);
+        double ny = S(76);
+        var id = St.SkillId;
+        if (string.IsNullOrEmpty(id)) LeftText(c, S(30), ny, "기록한 스킬 없음", S(14), false, Dim);
+        else if (SkillNames.Table.ContainsKey(id)) LeftText(c, S(30), ny, SkillNames.Find(id)!, S(16), true, Txt);
+        else
+        {
+            LeftText(c, S(30), ny, $"스킬 {id}", S(13), false, Muted);
+            if (Text(nameB.Edit).Length == 0) LeftText(c, S(160), ny, "이름 입력", S(14), false, Dim);
+        }
+        var last = St.RecordedAt.Where(t => t != null).Max();
+        if (last is DateTime lt) RightText(c, S(W - 30), ny, $"{lt:HH:mm} 기록", S(12), false, Dim);
+
+        // 매물 표
+        int hy = 116;
         LeftText(c, S(20), S(hy), "재료 스킬", S(13), false, Dim);
-        CenterText(c, S(196), S(hy), "개당 가격", S(13), false, Dim);
-        CenterText(c, S(290), S(hy), "매물 수", S(13), false, Dim);
-        RightText(c, S(W - 20), S(hy), "구매", S(13), false, Dim);
+        CenterText(c, S(140), S(hy), "매물", S(13), false, Dim);
+        CenterText(c, S(216), S(hy), "가격대", S(13), false, Dim);
+        RightText(c, S(304), S(hy), "구매", S(13), false, Dim);
         for (int i = 0; i < 3; i++)
         {
-            int y = RowsY + i * RowStep;
-            double cy = S(y) + S(FH) / 2.0;
+            double cy = S(RowCy(i));
             LeftText(c, S(20), cy, SkillCalc.Tiers[i], S(15), false, Txt);
             var (tw, _) = c.Measure(SkillCalc.Tiers[i], S(15), false);
             LeftText(c, S(20) + tw + S(6), cy + S(1), $"+{SkillCalc.Gain[i]}", S(12), false, Dim);
+            var list = St.Listings[i];
+            if (armed == i) CenterText(c, S(178), cy, "게임에서 검색하세요…", S(13), false, Gold);
+            else if (list == null) CenterText(c, S(178), cy, "기록 없음", S(13), false, Dim);
+            else if (list.Count == 0) CenterText(c, S(178), cy, "매물 없음", S(13), false, Dim);
+            else
+            {
+                CenterText(c, S(140), cy, $"{list.Count}개", S(15), false, Txt);
+                CenterText(c, S(216), cy, $"{Price(list.Min())} ~ {Price(list.Max())}", S(13), false, Muted);
+            }
             int buy = res?.Buy[i] ?? 0;
-            RightText(c, S(W - 20), cy, buy > 0 ? $"{buy}개" : "-", S(15), false, buy > 0 ? Gold : Dim);
+            RightText(c, S(304), cy, buy > 0 ? $"{buy}개" : "-", S(15), false, buy > 0 ? Gold : Dim);
+            // [기록] 버튼
+            double bx = S(BtnX), by = S(RowCy(i) - 14), bw = S(BtnW), bh = S(28);
+            if (armed == i)
+            {
+                c.FillRound(bx, by, bw, bh, S(8), Gold);
+                CenterText(c, bx + bw / 2, by + bh / 2, "대기 중", S(13), true, Canvas.Argb(255, 30, 22, 0));
+            }
+            else
+            {
+                c.FillRound(bx, by, bw, bh, S(8), Field);
+                c.StrokeRound(bx + 0.5, by + 0.5, bw - 1, bh - 1, S(8), GoldLine, 1);
+                CenterText(c, bx + bw / 2, by + bh / 2, "기록", S(13), false, Txt);
+            }
         }
-        Sep(c, 210);
+        Sep(c, 236);
 
-        LeftText(c, S(20), S(230), "최저 조합", S(15), false, Muted);
-        bool anyInput = St.Prices.Any(p => p != null) && St.Counts.Any(n => n > 0);
-        if (res is { } r && anyInput)
+        // 최저 조합
+        LeftText(c, S(20), S(256), "최저 조합", S(15), false, Muted);
+        bool any = St.Listings.Any(l => l is { Count: > 0 });
+        if (res is { } r && any)
         {
-            if (r.Enough) RightText(c, S(W - 20), S(230), $"상승치 {r.Points} / {SkillCalc.Need}", S(13), false, Green);
-            else RightText(c, S(W - 20), S(230), $"상승치 {SkillCalc.Need - r.Points} 부족 ({r.Points} / {SkillCalc.Need})", S(13), false, Warn);
-            var parts = Enumerable.Range(0, 3).Where(i => r.Buy[i] > 0)
-                .Select(i => $"{SkillCalc.Tiers[i]} {Price(St.Prices[i] ?? 0)} × {r.Buy[i]}").ToList();
-            LeftText(c, S(20), S(254), parts.Count > 0 ? string.Join("  +  ", parts) : "-", S(14), false, Txt);
+            int over = r.Points - SkillCalc.Need;
+            if (r.Enough) RightText(c, S(W - 20), S(256), $"상승치 {r.Points} / {SkillCalc.Need}" + (over > 0 ? $" ({over} 무효)" : ""), S(13), false, Green);
+            else RightText(c, S(W - 20), S(256), $"상승치 {-over} 부족 ({r.Points} / {SkillCalc.Need})", S(13), false, Warn);
+            int line = 0;
+            for (int i = 0; i < 3; i++)
+            {
+                if (r.Buy[i] <= 0) continue;
+                var sorted = St.Listings[i]!.OrderBy(p => p).Take(r.Buy[i]).ToList();
+                string range = sorted.Count == 1 ? Price(sorted[0]) : $"{Price(sorted[0])} ~ {Price(sorted[^1])}";
+                double y = S(ComboY + line * 20);
+                LeftText(c, S(20), y, $"{SkillCalc.Tiers[i]}  {range} × {r.Buy[i]}", S(14), false, Txt);
+                RightText(c, S(W - 20), y, Won(r.TierCost[i]), S(14), false, Txt);
+                line++;
+            }
         }
-        else LeftText(c, S(20), S(254), "티어별 개당 가격과 매물 수를 넣으세요", S(13), false, Dim);
-        LeftText(c, S(20), S(282), "스킬 재료비", S(15), false, Muted);
-        RightText(c, S(W - 20), S(282), Won(res?.SkillCost ?? 0) + "결", S(15), false, Txt);
-        Sep(c, 302);
+        else LeftText(c, S(20), S(ComboY), "티어별 [기록] 을 누르고 게임에서 가격 검색하세요", S(13), false, Dim);
+        LeftText(c, S(20), S(CostY), "스킬 재료비", S(15), false, Muted);
+        RightText(c, S(W - 20), S(CostY), Won(res?.SkillCost ?? 0) + "결", S(15), false, Txt);
+        Sep(c, CostY + 20);
 
-        double cy1 = S(318) + S(FH) / 2.0, cy2 = S(356) + S(FH) / 2.0;
+        double cy1 = S(InspY) + S(FH) / 2.0, cy2 = S(BaseY) + S(FH) / 2.0;
         LeftText(c, S(20), cy1, "영감 재료", S(15), false, Muted);
         var (w1, _) = c.Measure("영감 재료", S(15), false);
         LeftText(c, S(20) + w1 + S(8), cy1 + S(1), $"× {SkillCalc.InspirationCount}", S(12), false, Dim);
         RightText(c, S(W - 20), cy1, Won((St.Inspiration ?? 0) * SkillCalc.InspirationCount) + "결", S(15), false, Txt);
         LeftText(c, S(20), cy2, "베이스 비용", S(15), false, Muted);
         RightText(c, S(W - 20), cy2, Won(St.Base ?? 0) + "결", S(15), false, Txt);
-        Sep(c, 400);
-        LeftText(c, S(20), S(424), "총 비용", S(17), true, Txt);
-        RightText(c, S(W - 20), S(424), Won(res?.Total ?? 0) + "결", S(22), true, Gold);
-        LeftText(c, S(20), S(462), $"있는 매물 안에서 {SkillCalc.Need}을 가장 싸게 채우는 조합", S(12), false, Dim);
-        LeftText(c, S(20), S(480), "매물이 모자라면 '상승치 N 부족' 으로 표시", S(12), false, Dim);
+        Sep(c, BaseY + 44);
+        LeftText(c, S(20), S(BaseY + 68), "총 비용", S(17), true, Txt);
+        RightText(c, S(W - 20), S(BaseY + 68), Won(res?.Total ?? 0) + "결", S(22), true, Gold);
+        LeftText(c, S(20), S(BaseY + 104), "[기록] 을 누르고 게임에서 그 티어로 가격 검색", S(12), false, Dim);
+        LeftText(c, S(20), S(BaseY + 122), "기록 안 누른 검색(같은 스킬 필터 등)은 무시 · 매물은 1개씩", S(12), false, Dim);
     }
 }

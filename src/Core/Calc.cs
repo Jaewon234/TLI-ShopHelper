@@ -6,7 +6,7 @@ namespace ShopHelper;
 // =====================================================================
 // 부가 기능 계산기 2개 (트레이에서 여는 창). 계산은 여기, 화면은 App/CalcWindow.cs
 //   1) 장비 제작비: 등급별 1T/0T 옵션 개수 → 기대 제작비
-//   2) 부귀·숭고 스킬 레벨업: 재료 스킬 매물로 상승치 50 을 가장 싸게 채우는 조합
+//   2) 부귀·숭고 스킬 레벨업: 게임 가격 검색으로 기록한 재료 스킬 매물로 상승치 50 이상을 가장 싸게 채우는 조합
 // =====================================================================
 
 /// <summary>제작 1회 재료 (한손 기준). 엠버 종류는 등급마다 정해져 있음.</summary>
@@ -84,25 +84,32 @@ public static class CraftCalc
 
 public static class SkillCalc
 {
-    public static readonly string[] Tiers = { "2티어", "1티어", "0티어" };
-    /// <summary>재료 스킬 1개가 올려 주는 상승치</summary>
-    public static readonly int[] Gain = { 2, 5, 10 };
+    public static readonly string[] Tiers = { "0티어", "1티어", "2티어" };
+    /// <summary>재료 스킬 1개가 올려 주는 상승치 (0티어 +10, 1티어 +5, 2티어 +2)</summary>
+    public static readonly int[] Gain = { 10, 5, 2 };
     public const int Need = 50;
     public const int InspirationCount = 500;
 
-    public sealed record Result(int[] Buy, int Points, double SkillCost, bool Enough, double Total);
+    /// <summary>Buy[i] = i 티어에서 싼 매물부터 몇 개, TierCost[i] = 그 합. Points 는 넘친 것까지 포함한 상승치.</summary>
+    public sealed record Result(int[] Buy, double[] TierCost, int Points, double SkillCost, bool Enough, double Total);
 
     /// <summary>
-    /// 매물(개당 가격, 개수) 안에서 상승치 Need 이상을 가장 싸게 채우는 조합 (티어 섞기 가능, 넘쳐도 됨).
-    /// 가격을 안 넣은 티어는 매물이 없는 것으로 봄. 다 사도 모자라면 Enough=false 로 전부 산 경우를 돌려줌.
+    /// 티어별 매물 가격 목록(매물 하나 = 스킬 1개) 안에서 상승치 Need 이상을 가장 싸게 채우는 조합.
+    /// 50 을 넘겨도 됨 (넘친 만큼은 버려짐). 티어 섞기 가능. 같은 값이면 덜 넘치는 쪽, 그다음 개수가 적은 쪽.
+    /// 다 사도 모자라면 Enough=false 로 전부 산 경우를 돌려줌. listings[i] 가 null 이면 매물 없음.
     /// </summary>
-    public static Result Compute(double?[] prices, int[] counts, double inspirationPrice, double baseCost)
+    public static Result Compute(IReadOnlyList<double>?[] listings, double inspirationPrice, double baseCost)
     {
-        var avail = new int[3];
+        var sorted = new double[3][];
+        var prefix = new double[3][];
         for (int i = 0; i < 3; i++)
-            avail[i] = prices[i] is double p && p >= 0 ? Math.Max(0, counts[i]) : 0;
-        // 한 티어를 필요 이상 사는 건 손해라서, 티어마다 Need 를 혼자 채울 개수까지만 보면 됨
-        int Cap(int i) => Math.Min(avail[i], (Need + Gain[i] - 1) / Gain[i]);
+        {
+            sorted[i] = (listings.Length > i && listings[i] != null ? listings[i]!.Where(p => p >= 0) : Enumerable.Empty<double>()).OrderBy(p => p).ToArray();
+            prefix[i] = new double[sorted[i].Length + 1];
+            for (int k = 0; k < sorted[i].Length; k++) prefix[i][k + 1] = prefix[i][k] + sorted[i][k];
+        }
+        // 한 티어를 혼자 Need 를 채울 개수보다 많이 사는 건 손해 (가격이 0 이상이라)
+        int Cap(int i) => Math.Min(sorted[i].Length, (Need + Gain[i] - 1) / Gain[i]);
         int[]? best = null; double bestCost = double.MaxValue; int bestPts = 0;
         for (int a = 0; a <= Cap(0); a++)
             for (int b = 0; b <= Cap(1); b++)
@@ -110,17 +117,50 @@ public static class SkillCalc
                 {
                     int pts = a * Gain[0] + b * Gain[1] + c * Gain[2];
                     if (pts < Need) continue;
-                    double cost = a * (prices[0] ?? 0) + b * (prices[1] ?? 0) + c * (prices[2] ?? 0);
-                    // 같은 값이면 상승치가 덜 넘치는 쪽, 그다음 개수가 적은 쪽
+                    double cost = prefix[0][a] + prefix[1][b] + prefix[2][c];
                     if (cost < bestCost - 1e-9 || (Math.Abs(cost - bestCost) < 1e-9 && (pts < bestPts || (pts == bestPts && a + b + c < best!.Sum()))))
                     { best = new[] { a, b, c }; bestCost = cost; bestPts = pts; }
                 }
         double extra = Math.Max(0, inspirationPrice) * InspirationCount + baseCost;
-        if (best != null) return new Result(best, bestPts, bestCost, true, bestCost + extra);
-        // 모자람: 있는 걸 다 산 경우
-        double all = 0; int allPts = 0;
-        for (int i = 0; i < 3; i++) { all += avail[i] * (prices[i] ?? 0); allPts += avail[i] * Gain[i]; }
-        return new Result(avail, allPts, all, false, all + extra);
+        bool enough = best != null;
+        var buy = best ?? new[] { sorted[0].Length, sorted[1].Length, sorted[2].Length };
+        var tierCost = new double[3];
+        int points = 0;
+        for (int i = 0; i < 3; i++) { tierCost[i] = prefix[i][buy[i]]; points += buy[i] * Gain[i]; }
+        double skill = tierCost.Sum();
+        return new Result(buy, tierCost, points, skill, enough, skill + extra);
+    }
+}
+
+/// <summary>부귀·숭고 스킬 번호 → 이름 (tlidb 에서 만든 표, exe 에 들어 있음. tools/build_skill_names.py)</summary>
+public static class SkillNames
+{
+    public sealed record Entry(string Name, string Kind);
+    static Dictionary<string, Entry>? table;
+
+    public static IReadOnlyDictionary<string, Entry> Table => table ??= Load();
+
+    static Dictionary<string, Entry> Load()
+    {
+        var d = new Dictionary<string, Entry>();
+        try
+        {
+            using var s = typeof(SkillNames).Assembly.GetManifestResourceStream("skill_names.json");
+            if (s == null) return d;
+            using var doc = JsonDocument.Parse(s);
+            foreach (var p in doc.RootElement.GetProperty("skills").EnumerateObject())
+                d[p.Name] = new Entry(p.Value.GetProperty("name").GetString() ?? "", p.Value.TryGetProperty("kind", out var k) ? k.GetString() ?? "" : "");
+        }
+        catch { }
+        return d;
+    }
+
+    /// <summary>표 → 사용자가 적은 이름 순서로 찾음. 없으면 null</summary>
+    public static string? Find(string? id, IReadOnlyDictionary<string, string>? custom = null)
+    {
+        if (string.IsNullOrEmpty(id)) return null;
+        if (custom != null && custom.TryGetValue(id, out var c) && c.Length > 0) return c;
+        return Table.TryGetValue(id, out var e) ? e.Name : null;
     }
 }
 
@@ -155,8 +195,13 @@ public sealed class CalcState
 
     public sealed class SkillState
     {
-        [JsonPropertyName("prices")] public double?[] Prices { get; set; } = { null, null, null };
-        [JsonPropertyName("counts")] public int[] Counts { get; set; } = new int[3];
+        /// <summary>티어별(0·1·2티어) 마지막으로 기록한 매물 가격 목록 (null = 기록 없음)</summary>
+        [JsonPropertyName("listings")] public List<double>?[] Listings { get; set; } = { null, null, null };
+        [JsonPropertyName("recorded_at")] public DateTime?[] RecordedAt { get; set; } = { null, null, null };
+        /// <summary>기록한 스킬 번호 (게임 로그의 itemGoldId)</summary>
+        [JsonPropertyName("skill_id")] public string? SkillId { get; set; }
+        /// <summary>이름표에 없는 스킬에 사용자가 붙인 이름</summary>
+        [JsonPropertyName("names")] public Dictionary<string, string> Names { get; set; } = new();
         [JsonPropertyName("inspiration_price")] public double? Inspiration { get; set; }
         [JsonPropertyName("base")] public double? Base { get; set; }
         [JsonPropertyName("window")] public WinPos Window { get; set; } = new();
@@ -170,7 +215,8 @@ public sealed class CalcState
         // 배열 길이가 모자라면 (손으로 고친 파일 등) 채움
         static T[] Fix<T>(T[]? a) { var r = new T[3]; if (a != null) Array.Copy(a, r, Math.Min(3, a.Length)); return r; }
         s.Craft.EmberPrices = Fix(s.Craft.EmberPrices); s.Craft.T1 = Fix(s.Craft.T1); s.Craft.T0 = Fix(s.Craft.T0);
-        s.Skill.Prices = Fix(s.Skill.Prices); s.Skill.Counts = Fix(s.Skill.Counts);
+        s.Skill.Listings = Fix(s.Skill.Listings); s.Skill.RecordedAt = Fix(s.Skill.RecordedAt);
+        s.Skill.Names ??= new();
         if (s.Recipes == null || s.Recipes.Count == 0) s.Recipes = CraftCalc.DefaultRecipes();
         if (!s.Recipes.ContainsKey(s.Craft.Level)) s.Craft.Level = s.Recipes.Keys.Max();
         return s;
