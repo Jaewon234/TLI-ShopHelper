@@ -553,6 +553,17 @@ static class T
             Check(!r86.Grades[2].T1Possible && !r86.Grades[0].T0Possible && Math.Abs(r86.Grades[0].Subtotal - 11 / 0.0333 * 2) < 1e-6,
                 $"86레벨: 0T·절대자 불가(개수 무시), 양손 초급 1T = 11÷3.33%×2 = 661 - {r86.Grades[0].Subtotal:0}");
             Check(Math.Abs(r86.Craft - (11 + 28) / 0.0333 * 2) < 1e-6, $"86 양손 초급+진급 = 2,342 - {r86.Craft:0}");
+            // 82레벨: 결정 대신 결정 가루, 2T 까지, 초급·진급만
+            var r82 = CraftCalc.Compute(rec[82], false, 100, em, 10, new[] { 1, 2, 4 }, new[] { 4, 4, 4 }, 100, 0.02);
+            Check(Math.Abs(r82.Grades[0].T1 - 60) < 1e-6 && Math.Abs(r82.Grades[1].T1 - 5.3 / 0.035) < 1e-6 && !r82.Grades[2].T1Possible && !r82.Grades[0].T0Possible,
+                $"82 초급 2T = (가루5×0.02+진귀1×2)÷3.5% = 60, 진급 = 151.43, 절대자·승급 불가 - {r82.Grades[0].T1:0.##}, {r82.Grades[1].T1:0.##}");
+            Check(Math.Abs(r82.Craft - (60 + 2 * 5.3 / 0.035)) < 1e-6 && Math.Abs(r82.Total - r82.Craft - 100) < 1e-6, $"82 초급 1 + 진급 2 = 363 + 베이스 100 - {r82.Craft:0}, {r82.Total:0}");
+            var r82two = CraftCalc.Compute(rec[82], true, 100, em, 10, new[] { 1, 0, 0 }, new int[3], 0, 0.02);
+            Check(Math.Abs(r82two.Craft - 120) < 1e-6, "82 양손은 가루까지 2배 (120)");
+            var u82 = CraftCalc.Uses(rec[82]); var u100 = CraftCalc.Uses(rec[100]); var u86 = CraftCalc.Uses(rec[86]);
+            Check(u82.Dust && !u82.Fossil && !u82.AbsEmber && !u82.AnyT0 && u100.AbsEmber && u100.Fossil && u100.AnyT0 && !u100.Dust && !u86.Dust && !u86.Fossil,
+                "레벨별로 쓰는 재료 (82 가루 / 100 절대자 엠버·화석·0T / 86 엠버만)");
+            Check(CraftCalc.TopTier(82) == "2T" && CraftCalc.TopTier(86) == "1T" && CraftCalc.TopTier(100) == "1T", "개수 칸 머리글: 82 = 2T");
         }
 
         Console.WriteLine("\n[스킬 레벨업 계산]");
@@ -615,6 +626,10 @@ static class T
             File.WriteAllText(calcTmp, "{ \"craft\": { \"t1\": [1] } }");
             var bad = CalcState.Load(calcTmp);
             Check(bad.Craft.T1.Length == 3 && bad.Craft.T1[0] == 1 && bad.Recipes.ContainsKey(100), "손으로 고친 짧은 파일도 읽음");
+            // v1.8.1 파일 (82레벨 레시피 없음, 86 은 손으로 고친 값) → 82 만 채우고 86 은 그대로
+            var oldCalc = new CalcState(); oldCalc.Recipes.Remove(82); oldCalc.Recipes[86][0].T1!.Chance = 0.05; oldCalc.Save(calcTmp);
+            var up = CalcState.Load(calcTmp);
+            Check(up.Recipes.ContainsKey(82) && up.Recipes[82][1].T1!.Dust == 15 && up.Recipes[86][0].T1!.Chance == 0.05, "예전 calc.json 에 82레벨을 채우고 고친 레시피는 유지");
             File.Delete(calcTmp);
         }
 

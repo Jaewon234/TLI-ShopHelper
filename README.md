@@ -36,7 +36,7 @@ dotnet publish src/App/ShopHelper.csproj -c Release -o out
 Linux에서도 Windows용 exe를 빌드할 수 있습니다 (`EnableWindowsTargeting`, WinForms/WPF 미사용).
 
 ## 부가 기능 (트레이 메뉴)
-- 제작비 계산: 100/86레벨, 한손/양손, 보정 %, 재료 시세, 등급별 1T/0T 개수 → 제작비 + 베이스 비용 (`src/Core/Calc.cs` CraftCalc)
+- 제작비 계산: 100/86/82레벨, 한손/양손, 보정 %, 재료 시세, 등급별 1T/0T 개수 → 제작비 + 베이스 비용 (`src/Core/Calc.cs` CraftCalc)
 - 스킬 레벨업 (부귀·숭고): 티어별 [기록] 후 게임 가격 검색 → 로그의 `XchgSearchPrice` 결과(매물 가격 목록)로 상승치 50 이상을 가장 싸게 채우는 조합 + 영감 재료 ×500 + 베이스 비용 (`XchgParser`, `SkillCalc`)
 - 스킬 이름표: `src/Core/Models/skill_names.json` (tlidb 숭고·부귀 목록에서 `tools/build_skill_names.py` 로 생성, 새 시즌에 다시 실행)
 - 입력값과 제작 레시피는 `설정\calc.json`

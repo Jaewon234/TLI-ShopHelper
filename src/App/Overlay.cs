@@ -128,7 +128,7 @@ sealed class Overlay
         calc = CalcState.Load(App.CalcPath);
         Func<(int X, int Y, int W, int H)?> game = () => GameWindow.ClientRect(GameWindow.Find(cfg));
         void SaveCalc() { try { calc.Save(App.CalcPath); } catch (Exception e) { App.Log("계산기 저장 실패: " + e.Message); } }
-        craftWin = new CraftWindow("ShopHelperCalc", inst, game, calc, SaveCalc, AbsEmber, SetAbsEmber);
+        craftWin = new CraftWindow("ShopHelperCalc", inst, game, calc, SaveCalc, AbsEmber, SetAbsEmber, () => SharedItem(DustNames)?.Price, v => SetShared(DustNames, v));
         skillWin = new SkillWindow("ShopHelperCalc", inst, game, calc, SaveCalc);
         editor.Init("ShopHelperEditor", inst);
         onReady();
@@ -430,17 +430,24 @@ sealed class Overlay
         return false;
     }
 
-    /// <summary>제작비 계산의 절대자 엠버 = 상점 시세표의 절대자 엠버 (같은 값)</summary>
-    ItemDef? AbsEmberItem() => cfg.Items.FirstOrDefault(i => i.Name.Replace(" ", "") == CraftCalc.Embers[2].Replace(" ", ""));
-    double? AbsEmber() => AbsEmberItem()?.Price;
-    void SetAbsEmber(double? v)
+    // 제작비 계산의 절대자 엠버·결정 가루 = 상점 시세표의 같은 항목 (한쪽에서 고치면 둘 다 바뀜)
+    static readonly string[] AbsEmberNames = { CraftCalc.Embers[2] };
+    static readonly string[] DustNames = { "최초의 불꽃 가루", "결정가루", "결정 가루" };
+    ItemDef? SharedItem(string[] names)
     {
-        var it = AbsEmberItem();
+        var keys = names.Select(n => n.Replace(" ", "")).ToHashSet();
+        return cfg.Items.FirstOrDefault(i => keys.Contains(i.Name.Replace(" ", "")) || (i.Aliases ?? new()).Any(a => keys.Contains(a.Replace(" ", ""))));
+    }
+    void SetShared(string[] names, double? v)
+    {
+        var it = SharedItem(names);
         if (it == null || it.Price == v) return;
         it.Price = v;
         try { App.SavePrices(cfg); } catch (Exception e) { App.Log("시세 저장 실패: " + e.Message); }
         Engine?.Reevaluate();
     }
+    double? AbsEmber() => SharedItem(AbsEmberNames)?.Price;
+    void SetAbsEmber(double? v) => SetShared(AbsEmberNames, v);
 
     void OpenEditor()
     {

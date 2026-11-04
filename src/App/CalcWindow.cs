@@ -376,37 +376,43 @@ abstract class CalcWindow
 sealed class CraftWindow : CalcWindow
 {
     readonly CalcState state;
-    readonly Func<double?> getAbsEmber;      // 절대자 엠버 = 상점 시세표 값
-    readonly Action<double?> setAbsEmber;
+    readonly Func<double?> getAbsEmber, getDust;      // 절대자 엠버·결정 가루 = 상점 시세표 값
+    readonly Action<double?> setAbsEmber, setDust;
     CalcState.CraftState St => state.Craft;
-    protected override int H => 560;
+    protected override int H => 560;   // 레벨이 바뀌어도 창 크기·칸 위치는 그대로 (안 쓰는 칸은 여백)
     protected override string Title => "제작비 계산";
     protected override string Subtitle => "";
     protected override CalcState.WinPos Pos => St.Window;
 
-    Input corr = null!, fossil = null!, baseB = null!;
+    Input corr = null!, fossil = null!, dust = null!, baseB = null!;
     readonly Input[] ember = new Input[3], t1 = new Input[3], t0 = new Input[3];
     CraftCalc.Result? res;
 
     public CraftWindow(string cls, IntPtr inst, Func<(int X, int Y, int W, int H)?> gameRect, CalcState state, Action save,
-        Func<double?> getAbsEmber, Action<double?> setAbsEmber) : base(cls, inst, gameRect, save)
-    { this.state = state; this.getAbsEmber = getAbsEmber; this.setAbsEmber = setAbsEmber; }
+        Func<double?> getAbsEmber, Action<double?> setAbsEmber, Func<double?> getDust, Action<double?> setDust) : base(cls, inst, gameRect, save)
+    {
+        this.state = state; this.getAbsEmber = getAbsEmber; this.setAbsEmber = setAbsEmber; this.getDust = getDust; this.setDust = setDust;
+    }
 
-    // 배치 (논리 좌표, 창 너비 400)
+    // 배치 (논리 좌표, 창 너비 400). 재료 자리 ①진귀 ②희귀 ③절대자 엠버/결정 가루 ④신성한 화석
     const int RowY = 64, MatY = 138, TableY = 254, RowStep = 38;
     static (int x, int y) MatPos(int i) => (18 + (i % 2) * 186 + 92, MatY + (i / 2) * RowStep);
+
+    double? AbsEmber => getAbsEmber() ?? St.EmberPrices[2];
+    double? DustPrice => getDust() ?? St.DustPrice;
 
     protected override void Build()
     {
         corr = AddBox(258, RowY, 64, Fmt4(St.Correction), true, false, 0, limit: 4);
-        // 재료 시세: 진귀한 엠버, 희귀한 엠버, 절대자 엠버, 신성한 화석 (소수점 4자리까지)
-        double?[] mats = { St.EmberPrices[0], St.EmberPrices[1], getAbsEmber() ?? St.EmberPrices[2], St.FossilPrice };
+        // 재료 시세 (소수점 4자리까지). ③ 자리는 레벨에 따라 절대자 엠버 또는 결정 가루
+        double?[] mats = { St.EmberPrices[0], St.EmberPrices[1], AbsEmber, St.FossilPrice };
         for (int i = 0; i < 4; i++)
         {
             var (x, y) = MatPos(i);
             var b = AddBox(x, y, 80, Fmt4(mats[i]), true, false, 4, limit: 12);
             if (i < 3) ember[i] = b; else fossil = b;
         }
+        { var (x, y) = MatPos(2); dust = AddBox(x, y, 80, Fmt4(DustPrice), true, false, 4, limit: 12); }
         for (int g = 0; g < 3; g++)
         {
             int y = TableY + g * RowStep;
@@ -419,23 +425,28 @@ sealed class CraftWindow : CalcWindow
 
     CraftGrade[] Recipe => state.Recipes.TryGetValue(St.Level, out var r) ? r : state.Recipes[state.Recipes.Keys.Max()];
 
-    /// <summary>레벨에 따라 막히는 칸 (86: 0T 전체·절대자)</summary>
+    /// <summary>레벨에서 안 쓰는 칸은 숨김 (자리는 여백으로 남고, 넣어 둔 값은 그대로)</summary>
     void ApplyLevel()
     {
         var rec = Recipe;
+        var use = CraftCalc.Uses(rec);
+        SetHidden(ember[2], use.Dust || !use.AbsEmber);
+        SetHidden(dust, !use.Dust);
+        SetHidden(fossil, !use.Fossil);
         for (int g = 0; g < 3; g++)
         {
             var r = g < rec.Length ? rec[g] : new CraftGrade();
-            SetOff(t1[g], r.T1 == null);
-            SetOff(t0[g], r.T1 == null || r.T0 == null);
+            SetHidden(t1[g], r.T1 == null);
+            SetHidden(t0[g], r.T1 == null || r.T0 == null);
         }
     }
 
-    /// <summary>시세표에서 절대자 엠버를 바꿨을 때 (창이 열려 있으면 칸도 바꿈)</summary>
+    /// <summary>시세표에서 절대자 엠버·결정 가루를 바꿨을 때 (창이 열려 있으면 칸도 바꿈)</summary>
     public void RefreshShared()
     {
         if (!IsOpen) return;
-        SetBoxText(ember[2], Fmt4(getAbsEmber() ?? St.EmberPrices[2]));
+        SetBoxText(ember[2], Fmt4(AbsEmber));
+        SetBoxText(dust, Fmt4(DustPrice));
         Recalc();
     }
 
@@ -445,6 +456,8 @@ sealed class CraftWindow : CalcWindow
         St.EmberPrices[0] = Num(ember[0]); St.EmberPrices[1] = Num(ember[1]);
         var abs = Num(ember[2]);
         if (abs != St.EmberPrices[2] || abs != getAbsEmber()) { St.EmberPrices[2] = abs; setAbsEmber(abs); }
+        var du = Num(dust);
+        if (du != St.DustPrice || du != getDust()) { St.DustPrice = du; setDust(du); }
         St.FossilPrice = Num(fossil);
         for (int g = 0; g < 3; g++) { St.T1[g] = Int(t1[g]); St.T0[g] = Int(t0[g]); }
         St.Base = Num(baseB);
@@ -453,15 +466,15 @@ sealed class CraftWindow : CalcWindow
 
     protected override void Compute()
     {
-        double[] em = { St.EmberPrices[0] ?? 0, St.EmberPrices[1] ?? 0, getAbsEmber() ?? St.EmberPrices[2] ?? 0 };
-        res = CraftCalc.Compute(Recipe, St.TwoHand, Num(corr) ?? St.Correction, em, St.FossilPrice ?? 0, St.T1, St.T0, St.Base ?? 0);
+        double[] em = { St.EmberPrices[0] ?? 0, St.EmberPrices[1] ?? 0, AbsEmber ?? 0 };
+        res = CraftCalc.Compute(Recipe, St.TwoHand, Num(corr) ?? St.Correction, em, St.FossilPrice ?? 0, St.T1, St.T0, St.Base ?? 0, DustPrice ?? 0);
     }
 
     protected override bool Click(int x, int y)
     {
         if (InLogical(18, RowY, 96, FH, x, y))
         {
-            // 레벨: 100 → 86 → (82 …) → 100 (레시피에 있는 레벨 순서)
+            // 레벨: 100 → 86 → 82 → 100 (레시피에 있는 레벨, 높은 순)
             var levels = state.Recipes.Keys.OrderByDescending(k => k).ToList();
             St.Level = levels[(levels.IndexOf(St.Level) + 1) % levels.Count];
             ApplyLevel();
@@ -473,6 +486,8 @@ sealed class CraftWindow : CalcWindow
 
     protected override void DrawBody(Canvas c)
     {
+        var rec = Recipe;
+        var use = CraftCalc.Uses(rec);
         DrawCombo(c, 18, RowY, 96, $"{St.Level}레벨");
         DrawCombo(c, 122, RowY, 80, St.TwoHand ? "양손" : "한손");
         LeftText(c, S(222), S(RowY) + S(FH) / 2.0, "보정", S(15), false, Muted);
@@ -481,32 +496,39 @@ sealed class CraftWindow : CalcWindow
 
         LeftText(c, S(20), S(124), "재료 시세", S(13), false, Dim);
         RightText(c, S(W - 20), S(124), "1개당 결정", S(12), false, Dim);
-        string[] names = { CraftCalc.Embers[0], CraftCalc.Embers[1], CraftCalc.Embers[2], CraftCalc.Fossil };
+        string?[] names =
+        {
+            CraftCalc.Embers[0], CraftCalc.Embers[1],
+            use.Dust ? CraftCalc.Dust : use.AbsEmber ? CraftCalc.Embers[2] : null,
+            use.Fossil ? CraftCalc.Fossil : null,
+        };
         for (int i = 0; i < 4; i++)
         {
+            if (names[i] == null) continue;   // 안 쓰는 재료: 여백
             var (x, y) = MatPos(i);
-            LeftText(c, S(x - 90), S(y) + S(FH) / 2.0, names[i], S(14), false, Muted);
+            LeftText(c, S(x - 90), S(y) + S(FH) / 2.0, names[i]!, S(14), false, i == 2 && use.Dust ? Gold : Muted);
+        }
+        if (use.Dust && !use.Fossil)
+        {
+            var (x, y) = MatPos(3);   // ④ 자리가 비면 가루 시세 안내
+            LeftText(c, S(x - 90), S(y) + S(FH) / 2.0 - S(8), "결정 가루 = 강복 시세표의", S(11), false, Dim);
+            LeftText(c, S(x - 90), S(y) + S(FH) / 2.0 + S(8), "'최초의 불꽃 가루' 와 같은 값", S(11), false, Dim);
         }
         Sep(c, 222);
 
         int hy = 238;
         LeftText(c, S(20), S(hy), "등급", S(13), false, Dim);
-        CenterText(c, S(140), S(hy), "1T", S(13), false, Dim);
-        CenterText(c, S(212), S(hy), "0T", S(13), false, Dim);
+        CenterText(c, S(140), S(hy), CraftCalc.TopTier(St.Level), S(13), false, Dim);
+        if (use.AnyT0) CenterText(c, S(212), S(hy), "0T", S(13), false, Dim);
         RightText(c, S(W - 20), S(hy), "소계", S(13), false, Dim);
         for (int g = 0; g < 3; g++)
         {
-            int y = TableY + g * RowStep;
-            double cy = S(y) + S(FH) / 2.0;
             var gc = res?.Grades[g];
-            bool none = gc is { T1Possible: false };
-            LeftText(c, S(20), cy, CraftCalc.Grades[g], S(15), false, none ? Dim : Txt);
-            if (none) RightText(c, S(W - 20), cy, $"{St.Level}레벨 불가", S(12), false, Dim);
-            else
-            {
-                double sub = gc?.Subtotal ?? 0;
-                RightText(c, S(W - 20), cy, Won(sub), S(15), false, sub > 0 ? Txt : Dim);
-            }
+            if (gc is { T1Possible: false }) continue;   // 이 레벨에서 못 만드는 등급: 여백
+            double cy = S(TableY + g * RowStep) + S(FH) / 2.0;
+            LeftText(c, S(20), cy, CraftCalc.Grades[g], S(15), false, Txt);
+            double sub = gc?.Subtotal ?? 0;
+            RightText(c, S(W - 20), cy, Won(sub), S(15), false, sub > 0 ? Txt : Dim);
         }
         Sep(c, 374);
 
@@ -522,7 +544,9 @@ sealed class CraftWindow : CalcWindow
         Sep(c, 452);
         LeftText(c, S(20), S(476), "총 비용", S(17), true, Txt);
         RightText(c, S(W - 20), S(476), Won(res?.Total ?? 0) + "결", S(22), true, Gold);
-        LeftText(c, S(20), S(512), Recipe.Any(r => r.T0 != null) ? "0T = 1T 붙이기 + 승급 (실패해도 1T 유지)" : $"{St.Level}레벨: 1T 만 가능 (0T·절대자 불가)", S(12), false, Dim);
+        string foot = use.AnyT0 ? "0T = 1T 붙이기 + 승급 (실패해도 1T 유지)"
+            : $"{St.Level}레벨: {CraftCalc.TopTier(St.Level)} 까지 · 초급·진급만" + (use.Dust ? " · 재료에 결정 가루" : "");
+        LeftText(c, S(20), S(512), foot, S(12), false, Dim);
         LeftText(c, S(20), S(530), "개수는 0~4 · 양손은 재료 2배 · 레벨·한손은 눌러서 바꿈", S(12), false, Dim);
     }
 }

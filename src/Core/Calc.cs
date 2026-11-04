@@ -13,6 +13,8 @@ namespace ShopHelper;
 public sealed class CraftStep
 {
     [JsonPropertyName("crystal")] public double Crystal { get; set; }
+    /// <summary>최초의 불꽃 결정 가루 (82레벨은 결정 대신 가루)</summary>
+    [JsonPropertyName("dust")] public double Dust { get; set; }
     [JsonPropertyName("ember")] public double Ember { get; set; }
     [JsonPropertyName("fossil")] public double Fossil { get; set; }
     [JsonPropertyName("chance")] public double Chance { get; set; }
@@ -31,11 +33,19 @@ public static class CraftCalc
     /// <summary>등급별 엠버: 초급 = 진귀한 엠버, 진급 = 희귀한 엠버, 절대자 = 절대자 엠버</summary>
     public static readonly string[] Embers = { "진귀한 엠버", "희귀한 엠버", "절대자 엠버" };
     public const string Fossil = "신성한 화석";
-    public static readonly int[] Levels = { 100, 86 };
+    public const string Dust = "결정 가루";
+    /// <summary>레벨별 최고 티어 이름 (개수 칸 머리글). 없으면 1T</summary>
+    public static string TopTier(int level) => level <= 82 ? "2T" : "1T";
 
     /// <summary>게임 수치 (한손 1회 기준, 사용자가 알려 준 값). 양손은 전부 2배.</summary>
     public static Dictionary<int, CraftGrade[]> DefaultRecipes() => new()
     {
+        [82] = new[]
+        {
+            new CraftGrade { T1 = new() { Dust = 5, Ember = 1, Chance = 0.035 } },
+            new CraftGrade { T1 = new() { Dust = 15, Ember = 1, Chance = 0.035 } },
+            new CraftGrade(),   // 절대자 불가
+        },
         [86] = new[]
         {
             new CraftGrade { T1 = new() { Crystal = 1, Ember = 5, Chance = 0.0333 } },
@@ -51,8 +61,15 @@ public static class CraftCalc
     };
 
     /// <summary>1회 재료비 ÷ 확률 = 성공까지 평균 비용.</summary>
-    static double Expected(CraftStep s, double emberPrice, double fossilPrice) =>
-        s.Chance <= 0 ? 0 : (s.Crystal + s.Ember * emberPrice + s.Fossil * fossilPrice) / s.Chance;
+    static double Expected(CraftStep s, double emberPrice, double fossilPrice, double dustPrice) =>
+        s.Chance <= 0 ? 0 : (s.Crystal + s.Dust * dustPrice + s.Ember * emberPrice + s.Fossil * fossilPrice) / s.Chance;
+
+    /// <summary>이 레벨 레시피에서 쓰는 재료 (화면에서 안 쓰는 칸은 숨김)</summary>
+    public static (bool AbsEmber, bool Fossil, bool Dust, bool AnyT0) Uses(CraftGrade[] recipe)
+    {
+        var steps = recipe.SelectMany(g => new[] { g.T1, g.T0 }).Where(x => x != null).ToList();
+        return (recipe.Length > 2 && recipe[2].T1 != null, steps.Any(x => x!.Fossil > 0), steps.Any(x => x!.Dust > 0), recipe.Any(g => g.T1 != null && g.T0 != null));
+    }
 
     public sealed record GradeCost(bool T1Possible, bool T0Possible, double T1, double T0, double Subtotal);
     public sealed record Result(GradeCost[] Grades, double Craft, double Total);
@@ -62,7 +79,7 @@ public static class CraftCalc
     /// 양손이면 2배. 소계 = 옵션당 × 개수 (보정 전). 제작비 = Σ소계 × 보정%. 총 = 제작비 + 베이스(보정·양손 없음).
     /// </summary>
     public static Result Compute(CraftGrade[] recipe, bool twoHand, double correctionPct,
-        double[] emberPrices, double fossilPrice, int[] t1Counts, int[] t0Counts, double baseCost)
+        double[] emberPrices, double fossilPrice, int[] t1Counts, int[] t0Counts, double baseCost, double dustPrice = 0)
     {
         double hand = twoHand ? 2 : 1;
         var grades = new GradeCost[3];
@@ -71,8 +88,8 @@ public static class CraftCalc
         {
             var r = g < recipe.Length ? recipe[g] : new CraftGrade();
             bool p1 = r.T1 != null, p0 = r.T1 != null && r.T0 != null;
-            double c1 = p1 ? Expected(r.T1!, emberPrices[g], fossilPrice) * hand : 0;
-            double c0 = p0 ? c1 + Expected(r.T0!, emberPrices[g], fossilPrice) * hand : 0;
+            double c1 = p1 ? Expected(r.T1!, emberPrices[g], fossilPrice, dustPrice) * hand : 0;
+            double c0 = p0 ? c1 + Expected(r.T0!, emberPrices[g], fossilPrice, dustPrice) * hand : 0;
             double sub = (p1 ? c1 * t1Counts[g] : 0) + (p0 ? c0 * t0Counts[g] : 0);
             grades[g] = new GradeCost(p1, p0, c1, c0, sub);
             sum += sub;
@@ -187,6 +204,8 @@ public sealed class CalcState
         /// <summary>진귀한 엠버, 희귀한 엠버 (절대자 엠버는 상점 시세표 값을 같이 씀)</summary>
         [JsonPropertyName("ember_prices")] public double?[] EmberPrices { get; set; } = { null, null, null };
         [JsonPropertyName("fossil_price")] public double? FossilPrice { get; set; }
+        /// <summary>결정 가루 (상점 시세표의 '최초의 불꽃 가루' 를 같이 씀. 그 항목이 없을 때만 이 값)</summary>
+        [JsonPropertyName("dust_price")] public double? DustPrice { get; set; }
         [JsonPropertyName("t1")] public int[] T1 { get; set; } = new int[3];
         [JsonPropertyName("t0")] public int[] T0 { get; set; } = new int[3];
         [JsonPropertyName("base")] public double? Base { get; set; }
@@ -218,6 +237,8 @@ public sealed class CalcState
         s.Skill.Listings = Fix(s.Skill.Listings); s.Skill.RecordedAt = Fix(s.Skill.RecordedAt);
         s.Skill.Names ??= new();
         if (s.Recipes == null || s.Recipes.Count == 0) s.Recipes = CraftCalc.DefaultRecipes();
+        // 새 버전에서 추가된 레벨(예: 82)은 예전 파일에 없으니 기본 레시피로 채움 (있는 레벨은 손대지 않음)
+        foreach (var (lv, rec) in CraftCalc.DefaultRecipes()) s.Recipes.TryAdd(lv, rec);
         if (!s.Recipes.ContainsKey(s.Craft.Level)) s.Craft.Level = s.Recipes.Keys.Max();
         return s;
     }
