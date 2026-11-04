@@ -18,6 +18,11 @@ sealed class Overlay
     readonly Config cfg;
     public Engine? Engine;
     Editor? editor;
+    // 부가 기능: 트레이에서 여는 계산기 2개 (입력값은 설정\calc.json)
+    CraftWindow? craftWin;
+    SkillWindow? skillWin;
+    CalcState calc = new();
+    IEnumerable<CalcWindow> CalcWins => new CalcWindow?[] { craftWin, skillWin }.Where(w => w != null)!;
     IntPtr inst;
     public IntPtr EditorHwnd => editor?.Hwnd ?? IntPtr.Zero;
     volatile Updater.Release? update;
@@ -104,6 +109,8 @@ sealed class Overlay
         RegisterClassExW(ref ec);
         var pc = ec; pc.lpszClassName = "ShopHelperProgress";
         RegisterClassExW(ref pc);
+        var cc = ec; cc.lpszClassName = "ShopHelperCalc";
+        RegisterClassExW(ref cc);
 
         hwnd = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             wc.lpszClassName, "ShopHelper", WS_POPUP, 0, 0, 10, 10, IntPtr.Zero, IntPtr.Zero, inst, IntPtr.Zero);
@@ -117,7 +124,12 @@ sealed class Overlay
         App.Log("트레이 아이콘 등록");
         if (!RegisterHotKey(msgWnd, 1, 0x2 | 0x4 | 0x4000, 0x50)) App.Log("단축키 Ctrl+Shift+P 등록 실패 (다른 프로그램이 사용 중)");
         if (!RegisterHotKey(msgWnd, 2, 0x2 | 0x4 | 0x4000, 0x53)) App.Log("단축키 Ctrl+Shift+S 등록 실패 (다른 프로그램이 사용 중)");
-        editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => Engine?.Reevaluate());
+        editor = new Editor(cfg, () => Engine?.UnknownNames() ?? new List<string>(), () => { Engine?.Reevaluate(); craftWin?.RefreshShared(); });
+        calc = CalcState.Load(App.CalcPath);
+        Func<(int X, int Y, int W, int H)?> game = () => GameWindow.ClientRect(GameWindow.Find(cfg));
+        void SaveCalc() { try { calc.Save(App.CalcPath); } catch (Exception e) { App.Log("계산기 저장 실패: " + e.Message); } }
+        craftWin = new CraftWindow("ShopHelperCalc", inst, game, calc, SaveCalc, AbsEmber, SetAbsEmber);
+        skillWin = new SkillWindow("ShopHelperCalc", inst, game, calc, SaveCalc);
         editor.Init("ShopHelperEditor", inst);
         onReady();
         if (UpdatedFrom != null)
@@ -153,6 +165,7 @@ sealed class Overlay
         {
             var eh = EditorHwnd;
             if (eh != IntPtr.Zero && IsDialogMessageW(eh, ref m)) continue; // Tab 키 이동
+            if (CalcDialogMessage(ref m)) continue;
             TranslateMessage(ref m);
             DispatchMessageW(ref m);
         }
@@ -193,6 +206,9 @@ sealed class Overlay
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)7, "시세 입력...  (Ctrl+Shift+P)");
         AppendMenuW(menu, SEP, UIntPtr.Zero, null);
+        AppendMenuW(menu, craftWin?.IsOpen == true ? CHECKED : 0, (UIntPtr)13, "제작비 계산");
+        AppendMenuW(menu, skillWin?.IsOpen == true ? CHECKED : 0, (UIntPtr)14, "스킬 레벨업 (부귀·숭고)");
+        AppendMenuW(menu, SEP, UIntPtr.Zero, null);
         AppendMenuW(menu, 0, (UIntPtr)11, "지금 화면 그대로 저장  (Ctrl+Shift+S)");
         AppendMenuW(menu, 0, (UIntPtr)12, "순이익 초기화");
         AppendMenuW(menu, 0, (UIntPtr)5, "현재 화면 저장 (문제 확인용)");
@@ -224,6 +240,8 @@ sealed class Overlay
         switch (cmd)
         {
             case 7: OpenEditor(); break;
+            case 13: try { craftWin?.Toggle(); } catch (Exception e) { App.Log("제작비 계산 오류: " + e); } break;
+            case 14: try { skillWin?.Toggle(); } catch (Exception e) { App.Log("스킬 레벨업 오류: " + e); } break;
             case 5: Engine?.RequestSave(); break;
             case 11: SaveAsSeenLater(); break;   // 메뉴가 완전히 사라진 뒤에 찍음
             case 12: Engine?.ResetProfit(); break;
@@ -367,8 +385,10 @@ sealed class Overlay
                 }
             }
             // 2) 시세 창 / [시세 입력] 버튼
-            if (editor != null)
-                foreach (var (wf, wnd) in editor.RenderVisible())
+            var shots = editor?.RenderVisible() ?? new List<(Frame img, IntPtr hwnd)>();
+            foreach (var cw in CalcWins) if (cw.RenderVisible() is { } one) shots.Add(one);
+            if (shots.Count > 0)
+                foreach (var (wf, wnd) in shots)
                 {
                     GetWindowRect(wnd, out var wr);
                     int ww = wf.W, wh = wf.H;
@@ -394,6 +414,25 @@ sealed class Overlay
             ShellExecuteW(IntPtr.Zero, "open", "explorer.exe", $"/select,\"{path}\"", null, 1);
         }
         catch (Exception e) { App.Log("화면 저장 실패: " + e); Notify("저장 실패", e.Message); }
+    }
+
+    bool CalcDialogMessage(ref MSG m)
+    {
+        foreach (var w in CalcWins)
+            if (w.IsOpen && IsDialogMessageW(w.Hwnd, ref m)) return true;   // Tab 키로 칸 이동
+        return false;
+    }
+
+    /// <summary>제작비 계산의 절대자 엠버 = 상점 시세표의 절대자 엠버 (같은 값)</summary>
+    ItemDef? AbsEmberItem() => cfg.Items.FirstOrDefault(i => i.Name.Replace(" ", "") == CraftCalc.Embers[2].Replace(" ", ""));
+    double? AbsEmber() => AbsEmberItem()?.Price;
+    void SetAbsEmber(double? v)
+    {
+        var it = AbsEmberItem();
+        if (it == null || it.Price == v) return;
+        it.Price = v;
+        try { App.SavePrices(cfg); } catch (Exception e) { App.Log("시세 저장 실패: " + e.Message); }
+        Engine?.Reevaluate();
     }
 
     void OpenEditor()
@@ -426,6 +465,8 @@ sealed class Overlay
                 return handled;
             }
             if (progress.Handle(h, msg, w, l) is IntPtr handled2) return handled2;
+            foreach (var cw in CalcWins)
+                if (cw.Handle(h, msg, w, l) is IntPtr handled3) return handled3;
             switch (msg)
             {
                 case 0x312: // WM_HOTKEY

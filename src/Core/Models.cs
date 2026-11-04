@@ -132,7 +132,7 @@ public sealed class Config
         Name = $"신비의 휘석({size})", Kind = "gamble", Taxed = false, GambleMin = min, GambleMax = max,
     };
 
-    static readonly JsonSerializerOptions Opts = new()
+    internal static readonly JsonSerializerOptions Opts = new()
     {
         WriteIndented = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
@@ -228,7 +228,7 @@ public sealed class Config
     }
 
     /// <summary>중간에 꺼져도 파일이 깨지지 않게: 임시 파일에 쓰고 바꿔치기.</summary>
-    static void WriteAtomic(string path, string text)
+    public static void WriteAtomic(string path, string text)
     {
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, text);

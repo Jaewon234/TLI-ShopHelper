@@ -22,9 +22,11 @@ static class App
     public static readonly string PricesPath = Path.Combine(ConfDir, "prices.json");
     /// <summary>그 밖의 설정</summary>
     public static readonly string SettingsPath = Path.Combine(ConfDir, "settings.json");
+    /// <summary>계산기(제작비·스킬 레벨업) 입력값과 제작 레시피</summary>
+    public static readonly string CalcPath = Path.Combine(ConfDir, "calc.json");
     static readonly string[] LegacyConfigs = { Path.Combine(Dir, "config.json"), Path.Combine(OldDataDir, "config.json") };
     /// <summary>업데이트가 덮어쓰면 안 되는 것 (사용자 데이터: 파일 이름 또는 폴더 이름)</summary>
-    public static readonly string[] UserFiles = { "prices.json", "settings.json", "config.json", "helper.log", "설정", "캡처", "문제확인" };
+    public static readonly string[] UserFiles = { "prices.json", "settings.json", "calc.json", "config.json", "helper.log", "설정", "캡처", "문제확인" };
 
     static bool CanWrite(string dir)
     {
@@ -131,7 +133,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.9";
+    public const string Version = "1.8.0";
 
     [STAThread]
     static int Main(string[] args)

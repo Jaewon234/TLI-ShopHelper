@@ -35,6 +35,11 @@ dotnet publish src/App/ShopHelper.csproj -c Release -o out
 ```
 Linux에서도 Windows용 exe를 빌드할 수 있습니다 (`EnableWindowsTargeting`, WinForms/WPF 미사용).
 
+## 부가 기능 (트레이 메뉴)
+- 제작비 계산: 100/86레벨, 한손/양손, 보정 %, 재료 시세, 등급별 1T/0T 개수 → 제작비 + 베이스 비용 (`src/Core/Calc.cs` CraftCalc)
+- 스킬 레벨업 (부귀·숭고): 재료 스킬 매물(가격·개수)로 상승치 50 을 가장 싸게 채우는 조합 + 영감 재료 ×500 + 베이스 비용 (SkillCalc)
+- 입력값과 제작 레시피는 `설정\calc.json`
+
 ## 설정 (ShopHelper.exe 옆 `설정\` 폴더, 쓸 수 없으면 `%AppData%\ShopHelper\`)
 - `prices.json`: 시세만 (1개당 결정, `huiseok_price` = 신력의 휘석 1개가 몇 결정). 업데이트로 절대 덮어쓰지 않고, 새 기본 항목은 없는 것만 추가
 - `settings.json`: 그 밖의 설정 (`mode`, `check_updates`, `update_repo` …)

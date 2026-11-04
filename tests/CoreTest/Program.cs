@@ -536,6 +536,52 @@ static class T
         Check(c3.Items.Single(i => i.Name == "에너지 코어").Price == 0.05 && File.Exists(sp), "설정 파일이 없어도 시세는 그대로");
         Directory.Delete(dir, true);
 
+        Console.WriteLine("\n[제작비 계산]");
+        {
+            var rec = CraftCalc.DefaultRecipes();
+            double[] em = { 2, 5, 19.5 };
+            var r = CraftCalc.Compute(rec[100], false, 100, em, 10, new[] { 1, 0, 0 }, new[] { 1, 0, 2 }, 0);
+            Check(Math.Abs(r.Grades[0].T1 - 2100) < 1e-6, $"100 초급 1T = (1+10×2)÷1% = 2,100 - {r.Grades[0].T1:0.##}");
+            Check(Math.Abs(r.Grades[0].T0 - (2100 + 640 / 0.3)) < 1e-6, $"100 초급 0T = 1T + (30+300×2+10)÷30% = 4,233.33 - {r.Grades[0].T0:0.##}");
+            Check(Math.Abs(r.Grades[2].T1 - 990) < 1e-6 && Math.Abs(r.Grades[2].T0 - 2180) < 1e-6, $"100 절대자 1T 990, 0T 2,180 - {r.Grades[2].T1:0.##}, {r.Grades[2].T0:0.##}");
+            Check(Math.Abs(r.Grades[2].Subtotal - 4360) < 1e-6, "절대자 0T 2개 소계 4,360");
+            var r120 = CraftCalc.Compute(rec[100], false, 120, em, 10, new[] { 1, 0, 0 }, new[] { 1, 0, 2 }, 500);
+            Check(Math.Abs(r120.Craft - 12832) < 1 && Math.Abs(r120.Total - (r120.Craft + 500)) < 1e-6, $"보정 120% 제작비 12,832 + 베이스 500 (베이스엔 보정 없음) - {r120.Craft:0}, {r120.Total:0}");
+            var two = CraftCalc.Compute(rec[100], true, 100, em, 10, new[] { 1, 0, 0 }, new[] { 1, 0, 2 }, 500);
+            Check(Math.Abs(two.Craft - 2 * r.Craft) < 1e-6 && Math.Abs(two.Total - (2 * r.Craft + 500)) < 1e-6, "양손은 제작비만 2배 (베이스는 그대로)");
+            var r86 = CraftCalc.Compute(rec[86], true, 100, em, 10, new[] { 1, 1, 3 }, new[] { 4, 4, 4 }, 0);
+            Check(!r86.Grades[2].T1Possible && !r86.Grades[0].T0Possible && Math.Abs(r86.Grades[0].Subtotal - 11 / 0.0333 * 2) < 1e-6,
+                $"86레벨: 0T·절대자 불가(개수 무시), 양손 초급 1T = 11÷3.33%×2 = 661 - {r86.Grades[0].Subtotal:0}");
+            Check(Math.Abs(r86.Craft - (11 + 28) / 0.0333 * 2) < 1e-6, $"86 양손 초급+진급 = 2,342 - {r86.Craft:0}");
+        }
+
+        Console.WriteLine("\n[스킬 레벨업 계산]");
+        {
+            var r = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 10, 4, 3 }, 2, 500);
+            Check(r.Enough && r.Buy.SequenceEqual(new[] { 0, 4, 3 }) && r.Points == 50 && r.SkillCost == 4900 && r.Total == 6400,
+                $"매물 안에서 최저 조합: 1티어 4 + 0티어 3 = 4,900 (+영감 1,000 + 베이스 500 = 6,400) - {string.Join(",", r.Buy)} {r.SkillCost} {r.Total}");
+            var all = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 99, 99, 99 }, 0, 0);
+            Check(all.Buy.SequenceEqual(new[] { 0, 10, 0 }) && all.SkillCost == 1000, $"매물이 넉넉하면 1티어 10개 = 1,000 - {string.Join(",", all.Buy)} {all.SkillCost}");
+            var mix = SkillCalc.Compute(new double?[] { 10, 100, 1000 }, new[] { 99, 99, 99 }, 0, 0);
+            Check(mix.Buy.SequenceEqual(new[] { 25, 0, 0 }) && mix.SkillCost == 250, $"2티어가 싸면 2티어 25개 - {string.Join(",", mix.Buy)} {mix.SkillCost}");
+            var over = SkillCalc.Compute(new double?[] { 30, 100, null }, new[] { 2, 99, 0 }, 0, 0);
+            Check(over.Enough && over.Points >= 50 && over.SkillCost == 1000, $"넘치게 채우는 것도 비교 (2티어 2개+1티어 10개보다 1티어 10개) - {string.Join(",", over.Buy)} {over.SkillCost}");
+            var lack = SkillCalc.Compute(new double?[] { 1000, 100, 1500 }, new[] { 3, 4, 2 }, 0, 0);
+            Check(!lack.Enough && lack.Points == 46 && lack.SkillCost == 3000 + 400 + 3000, $"매물이 모자라면 부족 (46/50) - {lack.Points} {lack.SkillCost}");
+            var noPrice = SkillCalc.Compute(new double?[] { null, 100, null }, new[] { 50, 10, 50 }, 0, 0);
+            Check(noPrice.Buy.SequenceEqual(new[] { 0, 10, 0 }), "가격을 안 넣은 티어는 매물 없음으로 봄");
+        }
+        {
+            var calcTmp = Path.Combine(Path.GetTempPath(), "calc_test.json");
+            var st = new CalcState(); st.Craft.Level = 86; st.Craft.T1[1] = 3; st.Skill.Prices[2] = 1500; st.Save(calcTmp);
+            var back = CalcState.Load(calcTmp);
+            Check(back.Craft.Level == 86 && back.Craft.T1[1] == 3 && back.Skill.Prices[2] == 1500 && back.Recipes[100][2].T0!.Fossil == 6, "계산기 입력값 저장·읽기");
+            File.WriteAllText(calcTmp, "{ \"craft\": { \"t1\": [1] } }");
+            var bad = CalcState.Load(calcTmp);
+            Check(bad.Craft.T1.Length == 3 && bad.Craft.T1[0] == 1 && bad.Recipes.ContainsKey(100), "손으로 고친 짧은 파일도 읽음");
+            File.Delete(calcTmp);
+        }
+
         Console.WriteLine("\n[게임 로그 줄 해석]");
         {
             const string P = "[2026.11.03-22.17.14:500][122]TLLua: Display: [Game] ";

@@ -5,6 +5,7 @@ namespace ShopHelper;
 
 /// <summary>
 /// 숫자 입력칸: 숫자와 소수점(한 번)만 입력됨. 한글 입력(IME)은 꺼지고, 붙여넣기는 숫자와 첫 소수점만 남김.
+/// 칸마다 소수점 자릿수 제한, 받을 숫자(예: 0~4), 소수점 금지를 따로 정할 수 있음.
 /// </summary>
 static class NumericEdit
 {
@@ -27,11 +28,36 @@ static class NumericEdit
 
     static readonly SubclassProc Proc = WndProc;   // GC 방지
 
-    public static void Attach(IntPtr edit)
+    /// <summary>maxDecimals: 소수점 아래 최대 자릿수 (null = 제한 없음, 0 = 정수만). digits: 받을 숫자 (null = 0~9).</summary>
+    sealed record Opt(int? MaxDecimals, string Digits);
+    static readonly Dictionary<IntPtr, Opt> opts = new();
+
+    public static void Attach(IntPtr edit, int? maxDecimals = null, string? digits = null)
     {
         if (edit == IntPtr.Zero) return;
+        opts[edit] = new Opt(maxDecimals, digits ?? "0123456789");
         ImmAssociateContext(edit, IntPtr.Zero);   // 한/영 전환해도 한글이 안 들어감
         SetWindowSubclass(edit, Proc, (UIntPtr)1, UIntPtr.Zero);
+    }
+
+    static Opt OptOf(IntPtr h) => opts.TryGetValue(h, out var o) ? o : new Opt(null, "0123456789");
+
+    /// <summary>선택 부분을 ins 로 바꾼 뒤의 글자</summary>
+    static string WithInsert(IntPtr h, string ins)
+    {
+        var t = Text(h);
+        SendMessageW(h, EM_GETSEL, out int a, out int b);
+        a = Math.Clamp(a, 0, t.Length); b = Math.Clamp(b, a, t.Length);
+        return t[..a] + ins + t[b..];
+    }
+
+    /// <summary>이 칸에 들어갈 수 있는 글자인지 (숫자 종류, 소수점 한 번, 소수점 아래 자릿수)</summary>
+    static bool Valid(string t, Opt o)
+    {
+        int dot = t.IndexOf('.');
+        if (dot >= 0 && (o.MaxDecimals == 0 || t.IndexOf('.', dot + 1) >= 0)) return false;
+        foreach (var ch in t) if (ch != '.' && o.Digits.IndexOf(ch) < 0) return false;
+        return dot < 0 || o.MaxDecimals is not int m || t.Length - dot - 1 <= m;
     }
 
     static string Text(IntPtr h)
@@ -87,8 +113,7 @@ static class NumericEdit
             {
                 int ch = (int)wp.ToInt64();
                 if (ch < 0x20 || ch == 0x7F) break;                       // Backspace, Ctrl+A/C/V/X/Z 등
-                if (ch is >= '0' and <= '9') break;
-                if (ch == '.' && !DotOutsideSelection(h)) break;
+                if ((ch == '.' || ch is >= '0' and <= '9') && Valid(WithInsert(h, ((char)ch).ToString()), OptOf(h))) break;
                 return IntPtr.Zero;                                       // 그 밖의 글자는 무시 (소리 없음)
             }
             case WM_IME_STARTCOMPOSITION:
@@ -98,11 +123,15 @@ static class NumericEdit
             {
                 var clip = Clipboard(h);
                 if (clip == null) return IntPtr.Zero;
-                var f = Filter(clip, allowDot: !DotOutsideSelection(h));
+                var o = OptOf(h);
+                var f = new string(Filter(clip, allowDot: o.MaxDecimals != 0 && !DotOutsideSelection(h)).Where(c => c == '.' || o.Digits.IndexOf(c) >= 0).ToArray());
+                // 소수점 아래가 너무 길면 자름, 그래도 안 맞으면 (칸 글자 수 제한 등) 넣지 않음
+                while (f.Length > 0 && !Valid(WithInsert(h, f), o)) f = f[..^1];
                 if (f.Length > 0) SendMessageW(h, EM_REPLACESEL, new IntPtr(1), f);
                 return IntPtr.Zero;
             }
         }
+        if (msg == 0x82 /*WM_NCDESTROY*/) opts.Remove(h);
         return DefSubclassProc(h, msg, wp, lp);
     }
 }

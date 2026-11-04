@@ -12,7 +12,7 @@ static class Native
         WM_RBUTTONUP = 0x205, WM_LBUTTONDBLCLK = 0x203, WM_CONTEXTMENU = 0x7B;
     public const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
-    public const int SW_SHOWNOACTIVATE = 4;
+    public const int SW_SHOWNOACTIVATE = 4, SW_HIDE = 0;
     public const uint SRCCOPY = 0x00CC0020;
 
     public delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
