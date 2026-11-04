@@ -100,8 +100,8 @@ sealed class FakeOcr : IOcr
         lock (this) { en = true; try { return Recognize(img, src, scale); } finally { en = false; } }
     }
     public int MaxDim => 10000;
-    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale) { lock (this) return RecognizeInner(img, src, scale); }
-    List<List<OcrWord>> RecognizeInner(Frame img, Box src, double scale)
+    public List<List<OcrWord>> Recognize(Frame img, Box src, double scale) { lock (this) return RecognizeInner(src, scale); }
+    List<List<OcrWord>> RecognizeInner(Box src, double scale)
     {
         Calls++;
         if (Fail) return new();
@@ -116,7 +116,7 @@ sealed class FakeOcr : IOcr
         var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text)) && !NeverRead.Contains(t.Text)
                                          && !(!priceOnly && MissUnlessPriceOnly.Contains(t.Text))).Where(t => t.B.X1 >= src.X1 - 1 && t.B.X2 <= src.X2 + 1 && t.B.Y1 >= src.Y1 - 1 && t.B.Y2 <= src.Y2 + 1)
             .Select(t => new OcrWord(Read(t.Text), (t.B.X1 - src.X1) * scale, (t.B.Y1 - src.Y1) * scale, t.B.W * scale, t.B.H * scale)).ToList();
-        // Windows OCR 처럼 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
+        // 같은 높이의 단어는 한 줄로 (칸 사이까지 이어 붙임)
         return words.GroupBy(w => Math.Round(w.Y)).Select(g => g.OrderBy(w => w.X).ToList()).ToList();
     }
 }
@@ -448,20 +448,16 @@ static class T
 
         Console.WriteLine("[7] 시세 입력 해석 (1개당 결정)");
         double? v;
-        Check(PriceInput.TryParse("0.11", 50, out v) && v == 0.11, "0.11");
-        Check(PriceInput.TryParse("1/20", 50, out v) && v == 0.05, "1/20 = 0.05");
-        Check(PriceInput.TryParse("5.5휘", 50, out v) && v == 0.11, "5.5휘 = 0.11");
+        Check(PriceInput.TryParse("0.11", out v) && v == 0.11, "0.11");
         foreach (var (inp, want) in new[] { ("0.000", 0.0), ("0.", 0.0), (".", 0.0), ("00", 0.0), (".5", 0.5), ("0.0500", 0.05), ("12.", 12.0) })
-            Check(PriceInput.TryParse(inp, 50, out v) && v == want && Parser.FmtPrice(v!.Value) == Parser.FmtPrice(want), $"\"{inp}\" → {Parser.FmtPrice(want)}");
-        Check(PriceInput.TryParse("40휘/20", 50, out v) && v == 0.04, "40휘/20 = 0.04");
-        Check(PriceInput.TryParse("20.5결", 50, out v) && v == 20.5, "20.5결 = 20.5");
-        Check(PriceInput.TryParse("", 50, out v) && v == null, "빈칸 = 시세 없음");
-        Check(!PriceInput.TryParse("abc", 50, out _) && !PriceInput.TryParse("5/0", 50, out _), "잘못된 입력 거부");
+            Check(PriceInput.TryParse(inp, out v) && v == want && Parser.FmtPrice(v!.Value) == Parser.FmtPrice(want), $"\"{inp}\" → {Parser.FmtPrice(want)}");
+        Check(PriceInput.TryParse("", out v) && v == null, "빈칸 = 시세 없음");
+        Check(!PriceInput.TryParse("abc", out _) && !PriceInput.TryParse("1/20", out _) && !PriceInput.TryParse("5.5휘", out _) && !PriceInput.TryParse("1.2.3", out _), "숫자·소수점 말고는 거부 (1/20, 5.5휘, 1.2.3)");
 
         Check(Parser.FmtPrice(0.006) == "0.006" && Parser.FmtPrice(0.11) == "0.11" && Parser.FmtPrice(0.123456) == "0.12346" && Parser.FmtPrice(20.5) == "20.5" && Parser.FmtPrice(50) == "50",
               "시세 표시 소수점 5자리 (0.006, 0.11, 0.12346, 20.5, 50)");
         foreach (var it in new Config().Items.Where(i => i.Price is double))
-            Check(PriceInput.TryParse(Parser.FmtPrice(it.Price!.Value), 50, out var back) && back == it.Price, $"{it.Name}: 표시→다시 읽기 그대로 ({Parser.FmtPrice(it.Price!.Value)})");
+            Check(PriceInput.TryParse(Parser.FmtPrice(it.Price!.Value), out var back) && back == it.Price, $"{it.Name}: 표시→다시 읽기 그대로 ({Parser.FmtPrice(it.Price!.Value)})");
 
         Console.WriteLine("[7b] 추천 기준: 0.1결 이상만 구매");
         var rcfg = new Config { CrystalRate = 50, RecommendMin = 0.1 };

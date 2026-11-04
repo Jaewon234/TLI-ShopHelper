@@ -85,8 +85,6 @@ public static class Parser
         return cols;
     }
 
-    static readonly Regex NonDigit = new(@"\D", RegexOptions.Compiled);
-    static readonly Regex NonPriceChars = new(@"[\d\s,.]", RegexOptions.Compiled);
     static readonly Regex Hangul = new(@"[가-힣]", RegexOptions.Compiled);
     static readonly Regex TrailingX = new(@"[XxХх×&*ⅩㄨㄧӾ乂]$", RegexOptions.Compiled);
     static readonly Regex QtyRe = new(@"^(.*?)[XxХх×&*ⅩㄨӾ乂]\s*(\d+)$", RegexOptions.Compiled);   // OCR 이 X 를 & * 등으로 읽는 경우 포함

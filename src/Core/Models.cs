@@ -97,16 +97,13 @@ public sealed class Config
     [JsonPropertyName("reread_sec")] public double RereadSec { get; set; } = 1;
     /// <summary>자동 읽기 때 모든 칸을 동시에 읽기 (false 면 한 프레임에 한 칸씩, 예전 방식)</summary>
     [JsonPropertyName("parallel_reread")] public bool ParallelReread { get; set; } = true;
-    /// <summary>auto = Windows OCR 이 있으면 그걸, 없으면 내장 OCR / builtin = 항상 내장 OCR / windows = Windows OCR 만</summary>
     /// <summary>추천 기준: 이득이 이 값(결정) 이상인 칸만 초록 '구매'. 0 = 이득이면 모두</summary>
     [JsonPropertyName("recommend_min")] public double RecommendMin { get; set; } = 0;
-    [JsonPropertyName("ocr_engine")] public string OcrEngine { get; set; } = "auto";
     [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
     /// <summary>받아 봤더니 버전이 오르지 않은 릴리스 (태그를 잘못 붙인 경우) → 다시 권하지 않음</summary>
     [JsonPropertyName("skip_update_tag")] public string SkipUpdateTag { get; set; } = "";
     [JsonPropertyName("update_repo")] public string UpdateRepo { get; set; } = "Jaewon234/TLI-ShopHelper";
     [JsonPropertyName("window_class")] public string WindowClass { get; set; } = "UnrealWindow";
-    [JsonPropertyName("window_title_contains")] public string WindowTitleContains { get; set; } = "";
     [JsonPropertyName("_items_설명")] public string ItemsNote { get; set; } = "price = 1개당 결정. 모르면 null. kind=gamble 은 gamble_avg(평균 획득 휘석)로 계산";
     [JsonPropertyName("items")] public List<ItemDef> Items { get; set; } = DefaultItems();
     /// <summary>사용자가 지운 기본 항목 (업데이트 때 다시 추가하지 않음)</summary>

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
-using static ShopHelper.Native;
 
 namespace ShopHelper;
 

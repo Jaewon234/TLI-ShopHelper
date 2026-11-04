@@ -5,7 +5,7 @@
 시세 입력 창은 상점 안에서는 게임 화면 왼쪽 아래에 자동으로 뜨고([적용]), 상점 밖에서는 트레이 메뉴에서 엽니다([입력완료] 후 닫힘). 입력칸은 숫자와 소수점만 받습니다 (예: `5.5`, `0.04`).
 
 - 설치 필요 없음: `ShopHelper.exe` 하나 (자체 포함 .NET 8, 단일 파일)
-- OCR: 내장 PaddleOCR(PP-OCRv4 ONNX, `src/Core/Models`)만 사용 (PC 마다 결과가 같도록). 숫자는 영어 모델로 한 번 더 읽음. `ocr_engine: "windows"` 로 Windows OCR 을 고를 수도 있음
+- OCR: 내장 PaddleOCR(PP-OCRv4 ONNX, `src/Core/Models`)만 사용 (PC 마다 결과가 같도록). 숫자는 영어 모델로 한 번 더 읽음
 - 게임 메모리를 읽거나 입력을 보내지 않음. 로그 파일(`UE_game.log`)과 화면 캡처만 사용
 - 게임은 창 모드 / 테두리 없는 창 모드
 
@@ -17,7 +17,7 @@
 ## 동작
 1. `UE_game.log` 끝을 30ms 간격으로 읽어 `OpenView GroceryStoreV3` / `CloseView …_GroceryStoreV3Ctrl` 로 켜고 끔
    (로그 위치는 스팀 레지스트리 → `libraryfolders.vdf` → 실행 중인 게임 exe 순서로 자동 검색)
-2. 상점을 처음 열면 화면 전체를 Windows 한국어 OCR로 읽어 칸 위치를 찾음 (좌표 고정 없음 → 해상도/UI 크기 무관)
+2. 상점을 처음 열면 화면 전체를 내장 OCR로 읽어 칸 위치를 찾음 (좌표 고정 없음 → 해상도/UI 크기 무관)
 3. 그 뒤로는 칸이 있는 줄만 25ms마다 캡처해서 칸별 지문(축소 이미지)을 비교, 바뀐 칸만 처리
 4. 한 번 본 칸 그림은 기억해 두었다가 OCR 없이 즉시 결과 표시
 
@@ -25,7 +25,7 @@
 | 경로 | 내용 |
 |---|---|
 | `src/Core` | 인식/판정/추적 로직 (Windows 의존 없음, Linux에서도 테스트 가능) |
-| `src/App` | Win32 오버레이·트레이, GDI 캡처, Windows OCR, 로그 감시 |
+| `src/App` | Win32 오버레이·트레이, GDI 캡처, PNG 저장, 로그 감시 |
 | `tests/CoreTest` | 가짜 화면 + 가짜 OCR 로 Core 테스트 |
 
 ## 빌드

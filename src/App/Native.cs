@@ -8,9 +8,8 @@ static class Native
     public const int WS_POPUP = unchecked((int)0x80000000);
     public const int WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_TOPMOST = 0x8,
         WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x8000000;
-    public const uint WM_DESTROY = 0x2, WM_PAINT = 0xF, WM_COMMAND = 0x111, WM_APP = 0x8000,
+    public const uint WM_PAINT = 0xF, WM_APP = 0x8000,
         WM_RBUTTONUP = 0x205, WM_LBUTTONDBLCLK = 0x203, WM_CONTEXTMENU = 0x7B;
-    public const uint LWA_COLORKEY = 1;
     public const uint SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
     public const int SW_SHOWNOACTIVATE = 4;
@@ -82,7 +81,6 @@ static class Native
     [DllImport("gdi32.dll")] public static extern int CombineRgn(IntPtr dst, IntPtr a, IntPtr b, int mode);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
     [DllImport("gdi32.dll")] public static extern uint SetBkColor(IntPtr dc, uint c);
-    [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
     [DllImport("user32.dll")] public static extern bool SetLayeredWindowAttributes(IntPtr h, uint key, byte alpha, uint flags);
     [DllImport("user32.dll")] public static extern bool SetWindowDisplayAffinity(IntPtr h, uint affinity);
     [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr h);
@@ -107,7 +105,6 @@ static class Native
     [DllImport("user32.dll")] public static extern bool DestroyMenu(IntPtr menu);
     [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT p);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int MessageBoxW(IntPtr h, string text, string caption, uint type);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int DrawTextW(IntPtr dc, string text, int len, ref RECT r, uint fmt);
     [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
 
     [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr dc);
@@ -118,11 +115,7 @@ static class Native
     [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr dc);
     [DllImport("gdi32.dll")] public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
     [DllImport("gdi32.dll")] public static extern IntPtr CreateSolidBrush(uint color);
-    [DllImport("gdi32.dll")] public static extern IntPtr CreatePen(int style, int width, uint color);
-    [DllImport("gdi32.dll")] public static extern IntPtr GetStockObject(int obj);
-    [DllImport("gdi32.dll")] public static extern bool Rectangle(IntPtr dc, int l, int t, int r, int b);
     [DllImport("gdi32.dll")] public static extern uint SetTextColor(IntPtr dc, uint c);
-    [DllImport("gdi32.dll")] public static extern int SetBkMode(IntPtr dc, int mode);
     [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
     public static extern IntPtr CreateFontW(int h, int w, int esc, int orient, int weight, uint italic, uint underline, uint strike,
         uint charset, uint outPrec, uint clipPrec, uint quality, uint pitch, string face);

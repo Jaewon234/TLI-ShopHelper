@@ -16,13 +16,7 @@ static class GameWindow
         {
             if (!IsWindowVisible(h)) return true;
             sb.Clear(); GetClassNameW(h, sb, 256);
-            if (cfg.WindowClass.Length > 0 && sb.ToString() != cfg.WindowClass) return true;
-            if (cfg.WindowTitleContains.Length > 0)
-            {
-                sb.Clear(); GetWindowTextW(h, sb, 256);
-                if (!sb.ToString().Contains(cfg.WindowTitleContains)) return true;
-            }
-            if (cfg.WindowClass.Length == 0 && cfg.WindowTitleContains.Length == 0) return true;
+            if (cfg.WindowClass.Length == 0 || sb.ToString() != cfg.WindowClass) return true;
             found = h;
             return false;
         }, IntPtr.Zero);
@@ -179,15 +173,6 @@ sealed class Grabber : IDisposable
         var px = frame.Px;
         for (int i = 0; i < px.Length; i += 4 * 997) sum += px[i] + px[i + 1] + px[i + 2];
         return sum == 0 ? null : frame;
-    }
-
-    /// <summary>창 하나를 그대로 받아옴 (우리 시세 창처럼 검은 화면 검사 없이). 창 전체 크기.</summary>
-    public Frame? GrabWindowAny(IntPtr hwnd, int width, int height)
-    {
-        if (width != w || height != h || dib == IntPtr.Zero) Alloc(width, height);
-        if (!PrintWindow(hwnd, memDc, 0x2)) return null;   // PW_RENDERFULLCONTENT (자식 입력칸 포함)
-        Marshal.Copy(bits, frame!.Px, 0, frame.Px.Length);
-        return frame;
     }
 
     void Alloc(int width, int height)

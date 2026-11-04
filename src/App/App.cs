@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using static ShopHelper.Native;
 
 namespace ShopHelper;
@@ -132,7 +131,7 @@ static class App
 
     public static void Error(string msg) => MessageBoxW(IntPtr.Zero, msg, "신들의 강복 도우미", 0x10);
 
-    public const string Version = "1.7.8";
+    public const string Version = "1.7.9";
 
     [STAThread]
     static int Main(string[] args)
@@ -170,12 +169,13 @@ static class App
 
         Log("설정 읽음 · 항목 " + cfg.Items.Count + "개");
         TidyShots();
+        // 글자 인식은 프로그램에 넣은 OCR(PaddleOCR) 만 씀: 어느 PC 에서나 같은 결과
         IOcr ocr;
         try
         {
-            var stack = new OcrStack(cfg);
-            ocr = stack;
-            Log("OCR: " + stack.Describe);
+            var sw = Stopwatch.StartNew();
+            ocr = new PaddleOcr();
+            Log($"OCR: 내장 OCR (한국어+영어) 준비됨 ({sw.ElapsedMilliseconds}ms)");
         }
         catch (Exception e) { Log("OCR 오류: " + e); Error("OCR 을 준비하지 못했습니다:\n" + e.Message); return 1; }
 

@@ -14,14 +14,14 @@ sealed class Editor
 {
     const int ID_NAME = 1000, ID_PRICE = 2000, ID_RATE = 4001, IDOK = 1, IDCANCEL = 2;
     const int EN_CHANGE = 0x300, WM_SETFONT = 0x30, WM_CLOSE = 0x10, WM_COMMAND_ = 0x111, WM_PAINT_ = 0xF,
-        WM_ERASEBKGND = 0x14, WM_CTLCOLOREDIT = 0x133, WM_NCHITTEST = 0x84, WM_LBUTTONDOWN = 0x201, WM_LBUTTONUP = 0x202;
+        WM_ERASEBKGND = 0x14, WM_CTLCOLOREDIT = 0x133, WM_NCHITTEST = 0x84, WM_LBUTTONUP = 0x202;
     const int WS_EX_NOACTIVATE = 0x8000000;
     const int WS_CHILD = 0x40000000, WS_VISIBLE = 0x10000000, WS_TABSTOP = 0x10000, ES_AUTOHSCROLL = 0x80,
         WS_EX_CONTROLPARENT = 0x10000, WS_EX_TOOLWINDOW_ = 0x80, WS_CLIPCHILDREN = 0x02000000;
     const int SW_HIDE = 0, SW_SHOW = 5, SW_SHOWNOACTIVATE_ = 4, SW_RESTORE = 9;
 
     // 색
-    static readonly uint BgRgb = Rgb(14, 16, 22), FieldRgb = Rgb(26, 29, 37), TextRgb = Rgb(240, 240, 240);
+    static readonly uint FieldRgb = Rgb(26, 29, 37), TextRgb = Rgb(240, 240, 240);
     static readonly uint Bg = Canvas.Argb(255, 14, 16, 22), Field = Canvas.Argb(255, 26, 29, 37), Line_ = Canvas.Argb(255, 34, 38, 48),
         Border = Canvas.Argb(255, 44, 49, 61), Txt = Canvas.Argb(255, 225, 227, 232), Muted = Canvas.Argb(255, 150, 155, 165),
         Dim = Canvas.Argb(255, 105, 110, 120), Gold = Canvas.Argb(255, 234, 179, 8), GoldText = Canvas.Argb(255, 30, 22, 0),
@@ -99,13 +99,6 @@ sealed class Editor
         if (ShopScreenRect() is { } e) return e;
         if (ToggleExists && IsWindowVisible(toggle)) { GetWindowRect(toggle, out var r); return (r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top); }
         return null;
-    }
-
-    /// <summary>지금 화면에 보이는 시세 창/버튼 (화면 그대로 저장용)</summary>
-    public IEnumerable<IntPtr> VisibleWindows()
-    {
-        if (ToggleExists && IsWindowVisible(toggle)) yield return toggle;
-        if (Exists && IsWindowVisible(Hwnd)) yield return Hwnd;
     }
 
     public void ShowInShop((int X, int Y, int W, int H) g)
@@ -357,7 +350,7 @@ sealed class Editor
 
     /// <summary>입력칸은 '신력의 휘석 1개 = 몇 결정'. 계산에는 결정 1개 = 몇 휘석(역수)을 씀.</summary>
     double RateInput() =>
-        PriceInput.TryParse(Text(rateEdit), 1, out var v) && v is double d && d > 0 ? 1 / d : PriceInput.CrystalPrice(cfg);
+        PriceInput.TryParse(Text(rateEdit), out var v) && v is double d && d > 0 ? 1 / d : PriceInput.CrystalPrice(cfg);
 
     // ---------------- 그리기 ----------------
     void Paint()
@@ -383,7 +376,7 @@ sealed class Editor
         c.FillRect(S(18), S(20), S(4), S(20), Gold);
         c.Text(S(30), S(15), "시세 입력", S(20), true, Txt);
         var (tw, _) = c.Measure("시세 입력", S(20), true);
-        c.Text(S(30) + tw + S(10), S(22), "1개당 결정 · 1/20 · 5.5휘", S(13), false, Dim);
+        c.Text(S(30) + tw + S(10), S(22), "1개당 결정 (숫자만)", S(13), false, Dim);
         {
             var (x, y, w, h) = CloseRect;
             c.Line(x + S(6), y + S(6), x + w - S(6), y + h - S(6), Muted, 1.6);
@@ -430,7 +423,7 @@ sealed class Editor
             FieldBg(c, S(FieldX), y, S(FieldW), withTexts ? pt : "x", false);   // 평소엔 안내 문구를 입력칸이 직접 보여줌
             string res = "";
             uint rc = Dim;
-            if (!PriceInput.TryParse(pt, rate, out var v)) { res = "형식 오류"; rc = Warn; }
+            if (!PriceInput.TryParse(pt, out var v)) { res = "형식 오류"; rc = Warn; }
             else if (v is double d) res = "= " + Parser.FmtPrice(d * rate) + "휘";
             c.Text(S(FieldX + FieldW + 12), y + S(7), res, S(13), false, rc);
         }
@@ -465,7 +458,7 @@ sealed class Editor
         FieldBg(c, sx + S(22), sy + S(48), S(90), withTexts ? Text(minEdit) : "x", true);
         if (withTexts) c.Text(sx + S(32), sy + S(48) + (S(FieldH) - S(20)) / 2, Text(minEdit), S(15), false, Txt);
         c.Text(sx + S(22) + S(90) + S(8), sy + S(55), "결", S(14), true, Muted);
-        bool ok = PriceInput.TryParse(Text(minEdit), 1, out var v);
+        bool ok = PriceInput.TryParse(Text(minEdit), out _);
         c.Text(sx + S(14), sy + S(90), ok ? "이득이 이 값 이상인" : "숫자를 넣어 주세요", S(12), false, ok ? Dim : Warn);
         c.Text(sx + S(14), sy + S(108), "칸만 초록 '구매'", S(12), false, Dim);
     }
@@ -506,7 +499,7 @@ sealed class Editor
         var errors = new List<string>();
         double rate = PriceInput.CrystalPrice(cfg);
         double? huiseok = null;
-        if (PriceInput.TryParse(Text(rateEdit), 1, out var rv) && rv is double r0 && r0 > 0) { rate = 1 / r0; huiseok = r0; SetNormalized(rateEdit, r0); }
+        if (PriceInput.TryParse(Text(rateEdit), out var rv) && rv is double r0 && r0 > 0) { rate = 1 / r0; huiseok = r0; SetNormalized(rateEdit, r0); }
         else errors.Add("신력의 휘석 시세");
 
         // 결정·도박 항목은 그대로 두고, 나머지만 입력값으로 바꿈
@@ -525,7 +518,7 @@ sealed class Editor
             }
             if (name.Length == 0) continue;
             cfg.RemovedItems.RemoveAll(n => n.Replace(" ", "") == name.Replace(" ", ""));   // 지웠던 이름을 다시 넣으면 되살림
-            if (!PriceInput.TryParse(Text(r.PriceEdit), rate, out var v))
+            if (!PriceInput.TryParse(Text(r.PriceEdit), out var v))
             {
                 errors.Add(name);
                 if (r.Orig != null) { items.Add(r.Orig); seen.Add(r.Orig); }
@@ -637,7 +630,7 @@ sealed class Editor
                 if (code == EN_CHANGE && !loading && id == ID_MIN)
                 {
                     // 추천 기준은 입력하는 즉시 적용·저장 (시세처럼 [적용] 필요 없음)
-                    if (PriceInput.TryParse(Text(minEdit), 1, out var mv))
+                    if (PriceInput.TryParse(Text(minEdit), out var mv))
                     {
                         cfg.RecommendMin = Math.Max(0, mv ?? 0);
                         try { App.SaveSettings(cfg); } catch { }

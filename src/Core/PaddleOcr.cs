@@ -5,7 +5,7 @@ using Microsoft.ML.OnnxRuntime.Tensors;
 namespace ShopHelper;
 
 /// <summary>
-/// 프로그램에 넣은 OCR (PaddleOCR PP-OCRv4, ONNX). Windows OCR 이 없는 PC 에서도 동작.
+/// 프로그램에 넣은 OCR (PaddleOCR PP-OCRv4, ONNX). 어느 PC 에서나 같은 결과가 나오도록 이것만 씀.
 ///  - det.onnx        : 글자 줄 위치 찾기
 ///  - rec_korean.onnx : 한국어 (상품 이름)
 ///  - rec_en.onnx     : 영어·숫자 (가격, 개수)
@@ -95,7 +95,7 @@ public sealed class PaddleOcr : IOcr, IDisposable
     }
 
     // ---------------- 글자 위치 찾기 (DB) ----------------
-    /// <summary>글자 줄 위치. tight = 실제 글자 크기(위치 계산용, Windows OCR 상자와 비슷), wide = 넉넉히 넓힌 상자(글자 읽기용).</summary>
+    /// <summary>글자 줄 위치. tight = 실제 글자 크기(위치 계산용), wide = 넉넉히 넓힌 상자(글자 읽기용).</summary>
     public List<(Box tight, Box wide)> Detect(Frame img)
     {
         double r = Math.Max(img.W, img.H) > DetLimit ? (double)DetLimit / Math.Max(img.W, img.H) : 1.0;
