@@ -5,7 +5,7 @@
 시세 입력 창은 상점 안에서는 게임 화면 왼쪽 아래에 자동으로 뜨고([적용]), 상점 밖에서는 트레이 메뉴에서 엽니다([입력완료] 후 닫힘). 입력칸은 숫자와 소수점만 받습니다 (예: `5.5`, `0.04`).
 
 - 설치 필요 없음: `ShopHelper.exe` 하나 (자체 포함 .NET 8, 단일 파일)
-- OCR: Windows OCR 이 있으면 사용, 없으면 내장 PaddleOCR(PP-OCRv4 ONNX, `src/Core/Models`)로 자동 전환. 숫자는 영어 모델로 한 번 더 읽음
+- OCR: 내장 PaddleOCR(PP-OCRv4 ONNX, `src/Core/Models`)만 사용 (PC 마다 결과가 같도록). 숫자는 영어 모델로 한 번 더 읽음. `ocr_engine: "windows"` 로 Windows OCR 을 고를 수도 있음
 - 게임 메모리를 읽거나 입력을 보내지 않음. 로그 파일(`UE_game.log`)과 화면 캡처만 사용
 - 게임은 창 모드 / 테두리 없는 창 모드
 

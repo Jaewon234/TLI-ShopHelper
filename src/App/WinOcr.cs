@@ -49,23 +49,19 @@ sealed class WinOcr : IOcr
 }
 
 /// <summary>
-/// OCR 고르기: Windows OCR 이 있으면 그걸(빠름), 없으면 프로그램에 넣은 OCR(PaddleOCR) 을 씀.
-/// 숫자용 영어 OCR 도 Windows 에 없으면 내장 영어 모델을 씀. settings.json 의 ocr_engine 으로 고정 가능.
+/// OCR 고르기: 어느 PC 에서나 같은 결과가 나오도록 프로그램에 넣은 OCR(PaddleOCR) 만 씀.
+/// (Windows OCR 은 PC 마다 설치 여부와 인식률이 달라서 기본으로 쓰지 않음. settings.json 의 ocr_engine 을 "windows" 로 적을 때만 사용)
 /// </summary>
 sealed class OcrStack : IOcr
 {
     readonly WinOcr? win;
     readonly Lazy<PaddleOcr> paddle = new(() => { var sw = System.Diagnostics.Stopwatch.StartNew(); var p = new PaddleOcr(); App.Log($"내장 OCR 준비됨 ({sw.ElapsedMilliseconds}ms)"); return p; });
-    readonly bool builtinOnly;
     public string Describe { get; }
 
     public OcrStack(Config cfg)
     {
-        builtinOnly = cfg.OcrEngine.Equals("builtin", StringComparison.OrdinalIgnoreCase);
-        if (!builtinOnly)
-            try { win = new WinOcr(); } catch (Exception e) { App.Log("Windows 한국어 OCR 없음 → 내장 OCR 사용: " + e.Message.Split('\n')[0]); }
-        bool winOnly = cfg.OcrEngine.Equals("windows", StringComparison.OrdinalIgnoreCase);
-        if (win == null && winOnly) throw new InvalidOperationException("Windows 한국어 OCR 이 없습니다. settings.json 의 ocr_engine 을 auto 로 바꾸면 내장 OCR 을 씁니다.");
+        if (cfg.OcrEngine.Equals("windows", StringComparison.OrdinalIgnoreCase))
+            win = new WinOcr();   // 없으면 오류 (직접 고른 경우만)
         Describe = win == null ? "내장 OCR (한국어+영어)"
             : win.HasDigits ? "Windows OCR (한국어+영어)" : "Windows 한국어 OCR + 내장 영어 OCR (숫자)";
         if (win == null) _ = paddle.Value;   // 처음 상점을 열 때 기다리지 않게 미리 불러둠
