@@ -81,41 +81,5 @@ ShopHelper\
 
 게임 로그 경로를 직접 지정하려면 `설정\settings.json` 의 `"log_path"` 에 적으세요 (`\` 는 `\\` 로).
 
----
-
-## 개발
-
-C# / .NET 8, Win32 P/Invoke만 사용 (WinForms·WPF 없음). Linux 에서도 Windows 용 exe 를 빌드할 수 있습니다 (`EnableWindowsTargeting`).
-
-```
-dotnet run --project tests/CoreTest                      # 테스트
-dotnet publish src/App/ShopHelper.csproj -c Release -o out   # 단일 exe (자체 포함)
-```
-
-| 경로 | 내용 |
-|---|---|
-| `src/Core` | 인식·판정·추적, 로그 해석(`LogLine`, `XchgParser`), 계산기(`Calc.cs`), 내장 OCR(`PaddleOcr`). Windows 의존 없음 |
-| `src/Core/Models` | OCR 모델(PP-OCRv4 ONNX), 사전, 스킬 이름표 `skill_names.json` (exe 안에 포함) |
-| `src/App` | 오버레이·트레이·시세 창·계산기 창, 화면 캡처, 로그 감시, 자동 업데이트 |
-| `tests/CoreTest` | 가짜 화면·가짜 OCR·실제 로그 조각으로 Core 테스트. `--paddle 파일.bgra` 로 실제 스크린샷 인식 확인 |
-| `tools/build_skill_names.py` | tlidb 숭고·부귀 목록에서 스킬 번호 → 이름 표 생성 (새 시즌에 다시 실행) |
-
-### 동작 원리
-1. **상점 감지**: `UE_game.log` 끝을 30ms 마다 읽어 `DispatchPageRunChange PageName = GroceryStoreV3 , PageRunState = Run / Destory` 로 켜고 끔.
-   로그 위치는 실행 중인 게임 exe 기준 → 스팀 라이브러리 중 가장 최근에 쓰인 로그 순으로 찾고, 3초마다 다시 확인.
-2. **칸 찾기**: 상점을 처음 열면 화면 전체를 내장 OCR(PaddleOCR)로 읽어 칸 위치를 찾음 (좌표 고정 없음). 숫자는 영어 모델로 한 번 더 읽음.
-3. **추적**: 그 뒤로는 칸이 있는 줄만 캡처해 칸별 지문(축소 이미지)을 비교하고 바뀐 칸만 다시 읽음. 한 번 본 칸 그림은 기억해서 OCR 없이 바로 표시.
-   매진은 빨간 글씨 색으로 판단. 자동 읽기는 모든 칸 숫자를 뒤에서 동시에 다시 읽음.
-4. **스킬 레벨업**: 로그의 `XchgSearchPrice` 결과(`itemGoldId`, `unitPrices` 최대 100개)를 [기록] 한 티어에 넣음.
-
-### 릴리스
-- GitHub Actions 는 쓰지 않습니다. 로컬에서 빌드하고 릴리스에 zip 만 올립니다.
-- 태그 `vX.Y.Z`, 첨부 파일 이름 `ShopHelper.zip` (안에 `ShopHelper/ShopHelper.exe`, `사용법.txt`, `THIRD_PARTY.txt`).
-- 자동 업데이트는 로그인 없이 최신 릴리스를 읽으므로 저장소가 공개여야 합니다. 받은 파일은 GitHub 이 주는 SHA-256 으로 확인합니다.
-
-### 설정 파일 (`설정\`)
-- `prices.json`: 시세만. 1개당 결정, `huiseok_price` = 신력의 휘석 1개가 몇 결정. 업데이트는 새 기본 항목만 추가하고, 사용자가 지운 항목은 되살리지 않음.
-- `settings.json`: `mode`(`resell` 결정화 기준 / `use` 직접 사용), `recommend_min`, `reread_sec`, `parallel_reread`, `log_path`, `check_updates` …
-- `calc.json`: 계산기 입력값, 기록한 매물, 제작 레시피(`craft_recipes`, 게임 수치가 바뀌면 여기서 고침).
-
-사용한 라이브러리·모델과 출처는 [THIRD_PARTY.txt](THIRD_PARTY.txt) 를 보세요.
+## 출처
+프로그램에 들어 있는 글자 인식 모델·라이브러리와 스킬 이름표의 출처는 [THIRD_PARTY.txt](THIRD_PARTY.txt) 에 있습니다.
