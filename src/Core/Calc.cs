@@ -206,10 +206,26 @@ public sealed class CalcState
         [JsonPropertyName("fossil_price")] public double? FossilPrice { get; set; }
         /// <summary>결정 가루 (상점 시세표의 '최초의 불꽃 가루' 를 같이 씀. 그 항목이 없을 때만 이 값)</summary>
         [JsonPropertyName("dust_price")] public double? DustPrice { get; set; }
+        /// <summary>레벨별 값 (등급별 개수, 베이스 비용). 레벨을 바꾸면 그 레벨 값을 불러옴</summary>
+        [JsonPropertyName("levels")] public Dictionary<int, LevelVals> Levels { get; set; } = new();
+        public LevelVals For(int level)
+        {
+            if (!Levels.TryGetValue(level, out var v)) Levels[level] = v = new LevelVals();
+            return v;
+        }
+        // v1.8.2 까지: 레벨 구분 없이 한 벌. 읽을 때 그때 고른 레벨 값으로 옮기고 다시는 쓰지 않음
+        [JsonPropertyName("t1"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int[]? OldT1 { get; set; }
+        [JsonPropertyName("t0"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public int[]? OldT0 { get; set; }
+        [JsonPropertyName("base"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public double? OldBase { get; set; }
+        [JsonPropertyName("window")] public WinPos Window { get; set; } = new();
+    }
+
+    public sealed class LevelVals
+    {
+        /// <summary>등급별(초급·진급·절대자) 1T(82레벨은 2T) 개수</summary>
         [JsonPropertyName("t1")] public int[] T1 { get; set; } = new int[3];
         [JsonPropertyName("t0")] public int[] T0 { get; set; } = new int[3];
         [JsonPropertyName("base")] public double? Base { get; set; }
-        [JsonPropertyName("window")] public WinPos Window { get; set; } = new();
     }
 
     public sealed class SkillState
@@ -233,7 +249,18 @@ public sealed class CalcState
         catch { s = new(); }
         // 배열 길이가 모자라면 (손으로 고친 파일 등) 채움
         static T[] Fix<T>(T[]? a) { var r = new T[3]; if (a != null) Array.Copy(a, r, Math.Min(3, a.Length)); return r; }
-        s.Craft.EmberPrices = Fix(s.Craft.EmberPrices); s.Craft.T1 = Fix(s.Craft.T1); s.Craft.T0 = Fix(s.Craft.T0);
+        s.Craft.EmberPrices = Fix(s.Craft.EmberPrices);
+        s.Craft.Levels ??= new();
+        // 예전 파일: 레벨 구분 없던 개수·베이스 비용을 그때 고른 레벨로 옮김
+        if (s.Craft.OldT1 != null || s.Craft.OldT0 != null || s.Craft.OldBase != null)
+        {
+            var v = s.Craft.For(s.Craft.Level);
+            if (s.Craft.OldT1 != null) v.T1 = Fix(s.Craft.OldT1);
+            if (s.Craft.OldT0 != null) v.T0 = Fix(s.Craft.OldT0);
+            v.Base ??= s.Craft.OldBase;
+            s.Craft.OldT1 = s.Craft.OldT0 = null; s.Craft.OldBase = null;
+        }
+        foreach (var v in s.Craft.Levels.Values) { v.T1 = Fix(v.T1); v.T0 = Fix(v.T0); }
         s.Skill.Listings = Fix(s.Skill.Listings); s.Skill.RecordedAt = Fix(s.Skill.RecordedAt);
         s.Skill.Names ??= new();
         if (s.Recipes == null || s.Recipes.Count == 0) s.Recipes = CraftCalc.DefaultRecipes();

@@ -620,12 +620,24 @@ static class T
 
         {
             var calcTmp = Path.Combine(Path.GetTempPath(), "calc_test.json");
-            var st = new CalcState(); st.Craft.Level = 86; st.Craft.T1[1] = 3; st.Skill.Listings[2] = new() { 14, 15 }; st.Skill.SkillId = "8129"; st.Save(calcTmp);
+            var st = new CalcState(); st.Craft.Level = 86; st.Craft.For(86).T1[1] = 3; st.Craft.For(100).T1[1] = 1; st.Craft.For(100).Base = 700; st.Skill.Listings[2] = new() { 14, 15 }; st.Skill.SkillId = "8129"; st.Save(calcTmp);
             var back = CalcState.Load(calcTmp);
-            Check(back.Craft.Level == 86 && back.Craft.T1[1] == 3 && back.Skill.Listings[2]![1] == 15 && back.Skill.SkillId == "8129" && back.Skill.Listings[0] == null && back.Recipes[100][2].T0!.Fossil == 6, "계산기 입력값 저장·읽기");
+            Check(back.Craft.Level == 86 && back.Craft.For(86).T1[1] == 3 && back.Craft.For(100).T1[1] == 1 && back.Craft.For(100).Base == 700 && back.Craft.For(86).Base == null && back.Skill.Listings[2]![1] == 15 && back.Skill.SkillId == "8129" && back.Skill.Listings[0] == null && back.Recipes[100][2].T0!.Fossil == 6, "계산기 입력값 저장·읽기");
             File.WriteAllText(calcTmp, "{ \"craft\": { \"t1\": [1] } }");
             var bad = CalcState.Load(calcTmp);
-            Check(bad.Craft.T1.Length == 3 && bad.Craft.T1[0] == 1 && bad.Recipes.ContainsKey(100), "손으로 고친 짧은 파일도 읽음");
+            Check(bad.Craft.For(100).T1.Length == 3 && bad.Craft.For(100).T1[0] == 1 && bad.Recipes.ContainsKey(100), "손으로 고친 짧은 파일도 읽음");
+            // v1.8.2 파일: 레벨 구분 없는 t1/t0/base → 그때 고른 레벨(86)로 옮기고 다른 레벨은 빈칸
+            File.WriteAllText(calcTmp, "{ \"craft\": { \"level\": 86, \"t1\": [2, 1, 0], \"t0\": [0, 0, 3], \"base\": 450 } }");
+            var mig = CalcState.Load(calcTmp);
+            Check(mig.Craft.For(86).T1.SequenceEqual(new[] { 2, 1, 0 }) && mig.Craft.For(86).T0[2] == 3 && mig.Craft.For(86).Base == 450
+                  && mig.Craft.For(100).T1.Sum() == 0 && mig.Craft.For(100).Base == null && mig.Craft.OldT1 == null, "예전 개수·베이스 비용은 그때 고른 레벨로 옮김");
+            mig.Save(calcTmp);
+            using (var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(calcTmp)))
+            {
+                var craft = doc.RootElement.GetProperty("craft");
+                Check(!craft.TryGetProperty("t1", out _) && !craft.TryGetProperty("t0", out _) && !craft.TryGetProperty("base", out _) && craft.TryGetProperty("levels", out _),
+                    "저장할 때 예전 칸(t1/t0/base)은 다시 안 씀");
+            }
             // v1.8.1 파일 (82레벨 레시피 없음, 86 은 손으로 고친 값) → 82 만 채우고 86 은 그대로
             var oldCalc = new CalcState(); oldCalc.Recipes.Remove(82); oldCalc.Recipes[86][0].T1!.Chance = 0.05; oldCalc.Save(calcTmp);
             var up = CalcState.Load(calcTmp);

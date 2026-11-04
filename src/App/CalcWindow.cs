@@ -416,14 +416,29 @@ sealed class CraftWindow : CalcWindow
         for (int g = 0; g < 3; g++)
         {
             int y = TableY + g * RowStep;
-            t1[g] = AddBox(118, y, 44, St.T1[g] > 0 ? St.T1[g].ToString() : "", false, true, 0, "01234", 1);
-            t0[g] = AddBox(190, y, 44, St.T0[g] > 0 ? St.T0[g].ToString() : "", false, true, 0, "01234", 1);
+            t1[g] = AddBox(118, y, 44, "", false, true, 0, "01234", 1);
+            t0[g] = AddBox(190, y, 44, "", false, true, 0, "01234", 1);
         }
-        baseB = AddBox(W - 130, 410, 110, Fmt4(St.Base), true, false, 4, limit: 14);
+        baseB = AddBox(W - 130, 410, 110, "", true, false, 4, limit: 14);
+        LoadLevel();
         ApplyLevel();
     }
 
     CraftGrade[] Recipe => state.Recipes.TryGetValue(St.Level, out var r) ? r : state.Recipes[state.Recipes.Keys.Max()];
+    /// <summary>지금 레벨의 개수·베이스 비용</summary>
+    CalcState.LevelVals Cur => St.For(St.Level);
+
+    /// <summary>레벨을 바꿨을 때: 그 레벨에 넣어 둔 개수·베이스 비용을 칸에 채움</summary>
+    void LoadLevel()
+    {
+        var v = Cur;
+        for (int g = 0; g < 3; g++)
+        {
+            SetBoxText(t1[g], v.T1[g] > 0 ? v.T1[g].ToString() : "");
+            SetBoxText(t0[g], v.T0[g] > 0 ? v.T0[g].ToString() : "");
+        }
+        SetBoxText(baseB, Fmt4(v.Base));
+    }
 
     /// <summary>레벨에서 안 쓰는 칸은 숨김 (자리는 여백으로 남고, 넣어 둔 값은 그대로)</summary>
     void ApplyLevel()
@@ -459,15 +474,16 @@ sealed class CraftWindow : CalcWindow
         var du = Num(dust);
         if (du != St.DustPrice || du != getDust()) { St.DustPrice = du; setDust(du); }
         St.FossilPrice = Num(fossil);
-        for (int g = 0; g < 3; g++) { St.T1[g] = Int(t1[g]); St.T0[g] = Int(t0[g]); }
-        St.Base = Num(baseB);
+        var v = Cur;
+        for (int g = 0; g < 3; g++) { v.T1[g] = Int(t1[g]); v.T0[g] = Int(t0[g]); }
+        v.Base = Num(baseB);
         save();
     }
 
     protected override void Compute()
     {
         double[] em = { St.EmberPrices[0] ?? 0, St.EmberPrices[1] ?? 0, AbsEmber ?? 0 };
-        res = CraftCalc.Compute(Recipe, St.TwoHand, Num(corr) ?? St.Correction, em, St.FossilPrice ?? 0, St.T1, St.T0, St.Base ?? 0, DustPrice ?? 0);
+        res = CraftCalc.Compute(Recipe, St.TwoHand, Num(corr) ?? St.Correction, em, St.FossilPrice ?? 0, Cur.T1, Cur.T0, Cur.Base ?? 0, DustPrice ?? 0);
     }
 
     protected override bool Click(int x, int y)
@@ -477,6 +493,7 @@ sealed class CraftWindow : CalcWindow
             // 레벨: 100 → 86 → 82 → 100 (레시피에 있는 레벨, 높은 순)
             var levels = state.Recipes.Keys.OrderByDescending(k => k).ToList();
             St.Level = levels[(levels.IndexOf(St.Level) + 1) % levels.Count];
+            LoadLevel();   // 그 레벨 값으로 바꿈 (지금 값은 이미 저장돼 있음)
             ApplyLevel();
             return true;
         }
