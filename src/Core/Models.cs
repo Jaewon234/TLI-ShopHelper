@@ -99,6 +99,9 @@ public sealed class Config
     [JsonPropertyName("parallel_reread")] public bool ParallelReread { get; set; } = true;
     /// <summary>추천 기준: 이득이 이 값(결정) 이상인 칸만 초록 '구매'. 0 = 이득이면 모두</summary>
     [JsonPropertyName("recommend_min")] public double RecommendMin { get; set; } = 0;
+    /// <summary>상점 카드에 나오는 개수 (도박 제외). 영어 OCR 로 개수를 바로잡을 때 이 값만 받음. 비우면 제한 없음</summary>
+    [JsonPropertyName("qty_values")] public List<int> QtyValues { get; set; } = new() { 1, 5, 10, 20, 60, 100 };
+    public bool QtyAllowed(int q) => QtyValues == null || QtyValues.Count == 0 || QtyValues.Contains(q);
     [JsonPropertyName("check_updates")] public bool CheckUpdates { get; set; } = true;
     /// <summary>받아 봤더니 버전이 오르지 않은 릴리스 (태그를 잘못 붙인 경우) → 다시 권하지 않음</summary>
     [JsonPropertyName("skip_update_tag")] public string SkipUpdateTag { get; set; } = "";

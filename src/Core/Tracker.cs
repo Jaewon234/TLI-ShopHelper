@@ -46,6 +46,7 @@ public sealed class Tracker
         public bool Pending;
         public bool Stale;   // 다시 읽기에 실패해서 이전 결과를 보여주는 중 (계속 다시 시도)
         public int Fails;    // 연속 실패 횟수 (다시 시도 간격을 늘림)
+        public string? FixKey;   // 자동 읽기에서 지금 값과 다르게 읽힌 값 (다음에도 같으면 고침)
         public double ChangeT;
     }
 
@@ -160,11 +161,17 @@ public sealed class Tracker
                 var en = ens[ti];
                 if (en != null)
                 {
-                    var (p, q) = DigitsFrom(en, s);
+                    var (p, q, marked) = DigitsFromEx(en, s);
+                    // 자동 읽기에서 개수는 "X 숫자" 로 읽었을 때만 바꿈 (숫자만 읽힌 글자가 맞게 읽은 개수를 덮어쓰지 않게)
+                    if (!marked) q = null;
                     var fixedCard = cur.Clone();
-                    ApplyDigits(fixedCard, p, q);
-                    if (fixedCard.Price == cur.Price && fixedCard.Qty == cur.Qty) continue;
-                    Log?.Invoke($"다시 읽기로 고침: {Describe1(cur)} → {Describe1(fixedCard)}");
+                    ApplyDigits(fixedCard, p, q, quiet: true);
+                    if (fixedCard.Price == cur.Price && fixedCard.Qty == cur.Qty) { s.FixKey = null; continue; }
+                    // 한 번 튀는 값은 무시: 다시 읽은 값이 두 번 연속 같을 때만 고침
+                    var key = $"{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(cur)}|{fixedCard.Price}|{fixedCard.Qty}";
+                    if (s.FixKey != key) { s.FixKey = key; continue; }
+                    s.FixKey = null;
+                    Log?.Invoke($"다시 읽기로 고침 (2번 연속 같은 값): {Describe1(cur)} → {Describe1(fixedCard)}");
                     s.Card = fixedCard;
                     if (s.SettledFp != null && s.SettledPfp != null)
                     {
@@ -413,9 +420,12 @@ public sealed class Tracker
     }
 
     /// <summary>영어 OCR 결과에서 가격(가격 줄의 숫자)과 개수(X 뒤 숫자, 또는 이름 둘째 줄의 숫자).</summary>
-    static (int? price, int? qty) DigitsFrom(List<List<OcrWord>>? en, Slot s)
+    (int? price, int? qty) DigitsFrom(List<List<OcrWord>>? en, Slot s) { var (p, q, _) = DigitsFromEx(en, s); return (p, q); }
+
+    /// <summary>qtyMarked = 개수를 "X 숫자" 로 읽었는지 (숫자만 읽은 것보다 믿을 만함)</summary>
+    (int? price, int? qty, bool qtyMarked) DigitsFromEx(List<List<OcrWord>>? en, Slot s)
     {
-        if (en == null) return (null, null);
+        if (en == null) return (null, null, false);
         var segs = Parser.ToSegments(en);
         double h = Math.Max(4, s.PriceR.H / 1.4);
         int? price = null, qty = null;
@@ -423,13 +433,21 @@ public sealed class Tracker
                                  && (g.B.Y1 + g.B.Y2) / 2 < s.PriceR.Y2 + h * 0.3 && Parser.IsPrice(g.Text))
                      .OrderByDescending(g => Parser.PriceValue(g.Text).ToString().Length).FirstOrDefault();
         if (ps != null) price = Parser.PriceValue(ps.Text);
+        // 개수: "X 10" 처럼 X 뒤 숫자를 먼저 씀. 숫자만 있는 글자는 가격 바로 위 (이름 둘째 줄) 에 있을 때만 씀.
+        // 둘 다 가격에 가장 가까운 것 (카드 그림 쪽에서 잘못 읽힌 숫자가 개수로 들어가지 않게)
+        (double y, int v)? marked = null, plain = null;
         foreach (var g in segs.Where(g => g.B.Cx > s.R.X1 && g.B.Cx < s.R.X2 && g.B.Y2 > s.R.Y1 && (g.B.Y1 + g.B.Y2) / 2 < s.PriceR.Y1 - h * 0.3))
         {
-            var m = System.Text.RegularExpressions.Regex.Match(Parser.Norm(g.Text), @"[XxХх×&*]\s*([0-9]{1,4})$");
-            if (m.Success) { qty = int.Parse(m.Groups[1].Value); break; }
-            if (System.Text.RegularExpressions.Regex.IsMatch(Parser.Norm(g.Text), @"^[0-9]{1,4}$")) qty = int.Parse(Parser.Norm(g.Text));
+            double cy = (g.B.Y1 + g.B.Y2) / 2;
+            var t = Parser.Norm(g.Text);
+            var m = System.Text.RegularExpressions.Regex.Match(t, @"[XxХх×&*]\s*([0-9]{1,4})$");
+            // 상점에 나오지 않는 개수(예: 28)는 잘못 읽은 것으로 보고 버림
+            if (m.Success) { int v = int.Parse(m.Groups[1].Value); if (cfg.QtyAllowed(v) && (marked == null || cy > marked.Value.y)) marked = (cy, v); continue; }
+            if (System.Text.RegularExpressions.Regex.IsMatch(t, @"^[0-9]{1,4}$") && cy > s.PriceR.Y1 - h * 2.2 && cfg.QtyAllowed(int.Parse(t)) && (plain == null || cy > plain.Value.y))
+                plain = (cy, int.Parse(t));
         }
-        return (price, qty);
+        qty = marked?.v ?? plain?.v;
+        return (price, qty, marked != null);
     }
 
     Card? OcrSlot(Frame f, Slot s)
@@ -464,13 +482,13 @@ public sealed class Tracker
     }
 
     /// <summary>영어 OCR 로 읽은 가격·개수로 바로잡음.</summary>
-    void ApplyDigits(Card card, int? enPrice, int? enQty)
+    void ApplyDigits(Card card, int? enPrice, int? enQty, bool quiet = false)
     {
         bool fixedUp = false;
-        if (!card.Sold && enPrice is int ep && ep != card.Price) { Log?.Invoke($"가격 {card.Price} → {ep} (영어 OCR)"); card.Price = ep; fixedUp = true; }
+        if (!card.Sold && enPrice is int ep && ep != card.Price) { if (!quiet) Log?.Invoke($"가격 {card.Price} → {ep} (영어 OCR)"); card.Price = ep; fixedUp = true; }
         // 개수: 한국어 결과에 X 가 있거나 2개 이상일 때만 영어 쪽 숫자로 바로잡음 (개수 없는 상품에 엉뚱한 숫자가 붙지 않게)
-        if (enQty is int eq && eq > 0 && eq != card.Qty && (card.Qty > 1 || Parser.HasQtyMark(card.Raw)))
-        { Log?.Invoke($"개수 {card.Qty} → {eq} (영어 OCR)"); card.Qty = eq; fixedUp = true; }
+        if (enQty is int eq && eq > 0 && eq != card.Qty && cfg.QtyAllowed(eq) && (card.Qty > 1 || Parser.HasQtyMark(card.Raw)))
+        { if (!quiet) Log?.Invoke($"개수 {card.Qty} → {eq} (영어 OCR)"); card.Qty = eq; fixedUp = true; }
         if (fixedUp) Parser.Evaluate(card, cfg);
     }
 

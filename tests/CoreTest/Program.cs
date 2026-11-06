@@ -92,6 +92,7 @@ sealed class FakeOcr : IOcr
     public HashSet<string> NeverRead = new();          // 아예 못 읽는 글자 (매진되어 흐린 카드)
     public Dictionary<string, string> MisreadOnce = new(); // 처음 한 번만 잘못 읽는 글자 (588 → 432)
     public Dictionary<string, string> KoMisread = new();   // 한국어 OCR 만 잘못 읽는 숫자 (200 → 2예, 60 → 匍)
+    public Dictionary<string, string> EnMisread = new();   // 영어 OCR 이 늘 잘못 읽는 글자 ("" = 못 읽음). 예: X 10 → 28
     public bool HasEnglish;
     bool en;
     public List<List<OcrWord>>? RecognizeDigits(Frame img, Box src, double scale)
@@ -111,6 +112,7 @@ sealed class FakeOcr : IOcr
         {
             if (MisreadOnce.TryGetValue(t, out var wrong)) { MisreadOnce.Remove(t); return wrong; }
             if (!en && KoMisread.TryGetValue(t, out var kw)) return kw;
+            if (en && EnMisread.TryGetValue(t, out var ew)) return ew;
             return t;
         }
         var words = Scene.Items.Where(t => !(full && MissInFullScan.Contains(t.Text)) && !NeverRead.Contains(t.Text)
@@ -364,7 +366,7 @@ static class T
             // 1초가 지난 뒤 딱 한 프레임만에 고쳐지는지
             var scP = Scene.Make(n6, p8); ocrP.Scene = scP; var fP = scP.Render();
             double start = tP; int c0 = ocrP.Calls;
-            while (tP < start + 1500)
+            while (tP < start + 3500)   // 자동 읽기는 2번 연속 같은 값일 때 고침 → 두 바퀴
             {
                 trP.Update(fP, tP); tP += 30; Thread.Sleep(2);   // 동시 읽기는 뒤에서 돌아서 실제 시간이 조금 필요
                 if (trP.Snap().Slots[4].Card?.Price == 588) break;
@@ -373,6 +375,29 @@ static class T
             Check(trP.Snap().Slots[4].Card?.Price == 588, $"동시 읽기로 588 로 고침 (처음 {(wrongFirst ? 432 : 588)})");
             cfgP.ParallelReread = false;
             Check(!cfgP.ParallelReread, "parallel_reread=false 면 예전 방식(한 칸씩)");
+        }
+
+        Console.WriteLine("[5d6] 자동 읽기가 개수를 엉뚱하게 읽어도 맞게 읽은 개수를 바꾸지 않음 (2560×1440: 결정 X 10 → 28)");
+        {
+            string[][] nq = {
+                new[]{"이계의 메아리 X","20"}, new[]{"승화의 쐐기(매","직) X 20"}, new[]{"최초의 불꽃 가루","X 20"}, new[]{"최초의 불꽃 결정","X 10"},
+                new[]{"에너지 코어 X 20"}, new[]{"최초의 불꽃 결정"}, new[]{"이계의 메아리 X","10"}, new[]{"신비의 휘석(대)"} };
+            string[] pq = { "122", "18", "4", "468", "86", "58", "68", "500" };
+            // 영어 OCR: 결정 칸의 "X" 를 못 읽고 "10" 을 "28" 로 읽음 (늘 같게)
+            var oq = new FakeOcr { HasEnglish = true };
+            var cq = new Config { CrystalRate = 50, RereadSec = 0.1 };
+            var tq = new Tracker(oq, cq) { RelayoutMs = 0 };
+            double tt = 0; tq.Reset(tt);
+            Run(tq, oq, Scene.Make(nq, pq), ref tt, 25);
+            int q0 = tq.Snap().Slots[3].Card?.Qty ?? -1;
+            oq.EnMisread["X"] = ""; oq.EnMisread["10"] = "28";
+            Run(tq, oq, Scene.Make(nq, pq), ref tt, 100);   // 3초 동안 자동 읽기 여러 번
+            Check(q0 == 10 && tq.Snap().Slots[3].Card?.Qty == 10, $"결정 x10 은 그대로 (처음 {q0}, 3초 뒤 {tq.Snap().Slots[3].Card?.Qty})");
+            // "X 28" 로 X 까지 읽혀도 상점에 없는 개수라 무시
+            oq.EnMisread.Clear(); oq.EnMisread["10"] = "28";
+            Run(tq, oq, Scene.Make(nq, pq), ref tt, 100);
+            Check(tq.Snap().Slots[3].Card?.Qty == 10, $"X 28 처럼 상점에 없는 개수는 무시 - {tq.Snap().Slots[3].Card?.Qty}");
+            Check(cq.QtyAllowed(60) && cq.QtyAllowed(100) && !cq.QtyAllowed(28) && new Config { QtyValues = new() }.QtyAllowed(28), "개수 목록: 1·5·10·20·60·100 (비우면 제한 없음)");
         }
 
         Console.WriteLine("[5d5] 한국어 OCR 이 숫자를 한글로 읽어도 영어 OCR 로 바로잡음 (200 → 2예, 60 → 匍)");
